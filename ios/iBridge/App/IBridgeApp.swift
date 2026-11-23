@@ -19,7 +19,6 @@ struct IBridgeApp: App {
             let c = Central(store: store)
             _central = State(initialValue: c)
             AppDelegate.central = c
-            Notify.setUp()
         }
     }
 
@@ -50,6 +49,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        // Registered here, once the app has launched: from the SwiftUI App init the call category's
+        // Decline / Text back buttons were silently missing on a real iPhone.
+        if Demo.scenario() == nil { Notify.setUp() }
         return true
     }
 
