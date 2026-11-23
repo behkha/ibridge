@@ -69,6 +69,25 @@ class Gatt(
 
     private var advertising = false
     private var lowLatency = false
+    /** When Android last started or lost the iPhone: advertising is fast right after, so a suspended iPhone finds it. */
+    private var unlinkedSince = System.currentTimeMillis()
+    private var advertisingMode = -1
+
+    private fun wantedMode(): Int {
+        val away = System.currentTimeMillis() - unlinkedSince
+        return when {
+            lowLatency || away < 2 * 60_000 -> AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY // ~100 ms
+            away < 12 * 60_000 -> AdvertiseSettings.ADVERTISE_MODE_BALANCED // ~250 ms
+            else -> AdvertiseSettings.ADVERTISE_MODE_LOW_POWER // ~1 s
+        }
+    }
+
+    /** Re-checks the advertising mode at the 2- and 12-minute marks after a disconnect. */
+    private fun scheduleModeChecks() {
+        for (at in longArrayOf(2 * 60_000L + 500, 12 * 60_000L + 500)) post(delayMs = at) {
+            if (advertising && wantedMode() != advertisingMode) { stopAdvertising(); advertise() }
+        }
+    }
 
     fun start() = post {
         if (server != null) return@post
@@ -79,15 +98,26 @@ class Gatt(
         val rx = BluetoothGattCharacteristic(
             Proto.RX,
             BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE,
-            BluetoothGattCharacteristic.PERMISSION_WRITE,
+            BluetoothGattCharacteristic.PERMISSION_WRITE_ENCRYPTED,
         )
         tx = BluetoothGattCharacteristic(Proto.TX, BluetoothGattCharacteristic.PROPERTY_NOTIFY, BluetoothGattCharacteristic.PERMISSION_READ)
-        tx.addDescriptor(BluetoothGattDescriptor(Proto.CCCD, BluetoothGattDescriptor.PERMISSION_READ or BluetoothGattDescriptor.PERMISSION_WRITE))
+        // Encrypted-only: the first subscribe makes iOS bond with this phone (one system prompt on each side).
+        // Bonded, iOS resolves Android's rotating address and reconnects by itself, even while iBridge is suspended.
+        tx.addDescriptor(BluetoothGattDescriptor(Proto.CCCD, BluetoothGattDescriptor.PERMISSION_READ_ENCRYPTED or BluetoothGattDescriptor.PERMISSION_WRITE_ENCRYPTED))
         service.addCharacteristic(rx)
         service.addCharacteristic(tx)
         s.addService(service)
         server = s
+        // A previous run may have died with the iPhone still connected: the radio link can outlive the app
+        // (other apps' GATT servers keep it up), and the iPhone would sit on a dead session. Drop such links
+        // so the iPhone sees a disconnect and reconnects to this run.
+        manager.getConnectedDevices(BluetoothProfile.GATT_SERVER).forEach { d ->
+            Log.i(TAG, "dropping a link left from an earlier run")
+            s.cancelConnection(d)
+        }
+        unlinkedSince = System.currentTimeMillis()
         advertise()
+        scheduleModeChecks()
     }
 
     fun stop() = post {
@@ -116,7 +146,7 @@ class Gatt(
         if (advertising || engine?.isLive == true || server == null) return
         val adv = manager.adapter?.bluetoothLeAdvertiser ?: return
         val settings = AdvertiseSettings.Builder()
-            .setAdvertiseMode(if (lowLatency) AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY else AdvertiseSettings.ADVERTISE_MODE_LOW_POWER)
+            .setAdvertiseMode(wantedMode().also { advertisingMode = it })
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
             .setConnectable(true)
             .build()
@@ -184,7 +214,9 @@ class Gatt(
         server?.cancelConnection(d)
         resetConnection()
         onDisconnected()
+        unlinkedSince = System.currentTimeMillis()
         advertise()
+        scheduleModeChecks()
     }
 
     private fun fail(d: BluetoothDevice, e: ProtocolException) {
@@ -200,7 +232,9 @@ class Gatt(
                 Log.i(TAG, "central disconnected")
                 resetConnection()
                 onDisconnected()
+                unlinkedSince = System.currentTimeMillis()
                 advertise()
+                scheduleModeChecks()
             }
         }
 

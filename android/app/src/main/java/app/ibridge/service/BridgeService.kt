@@ -126,10 +126,16 @@ class BridgeService : Service() {
         onMessage = ::onMessage,
     )
 
-    private fun push(msg: JSONObject): Boolean = gatt.engine?.sendMessage(msg) == true
+    /** Sends one message to the iPhone. Logs its type and id only, never its content. */
+    private fun push(msg: JSONObject): Boolean {
+        val ok = gatt.engine?.sendMessage(msg) == true
+        Log.i(TAG, "→ ${msg.optString("t")} ${msg.optString("id", msg.optString("call", msg.optString("kind")))}${if (ok) "" else " (not sent: no live link)"}")
+        return ok
+    }
 
     /** Runs on the GATT worker thread. */
     private fun onMessage(m: JSONObject) {
+        Log.i(TAG, "← ${m.optString("t")} ${m.optString("kind", m.optString("call"))}")
         when (m.optString("t")) {
             "hello" -> sendStatus(force = true)
             "ping" -> push(JSONObject().put("t", "pong").put("ts", System.currentTimeMillis()))

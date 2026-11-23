@@ -28,10 +28,20 @@ final class Central: NSObject {
         set { UserDefaults.standard.set(newValue?.uuidString, forKey: "peripheral") }
     }
 
+    private var watchdog: Timer?
+    private var pingSentAt: Date?
+
     init(store: Store) {
         self.store = store
         super.init()
         manager = CBCentralManager(delegate: self, queue: .main, options: [CBCentralManagerOptionRestoreIdentifierKey: "app.ibridge.central"])
+        // Never sit idle while not linked, and never trust a "linked" state Android no longer shares.
+        watchdog = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkLink() }
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkLink(probe: true) }
+        }
         store.onMorePages = { [weak self] kind, cursor in self?.send(["t": "sync", "kind": kind, "cursor": cursor ?? NSNull(), "limit": 200]) }
     }
 
@@ -83,6 +93,32 @@ final class Central: NSObject {
 
     // MARK: connection
 
+    /// Keeps a scan and a pending connect running while not linked. With `probe`, pings a link that looks live:
+    /// a restarted Android can leave the radio link up with no session behind it.
+    private func checkLink(probe: Bool = false) {
+        guard manager.state == .poweredOn, store.peer != nil || pairing != nil else { return }
+        if let sent = pingSentAt, Date().timeIntervalSince(sent) > 5 {
+            log.notice("no pong in 5 s; dropping a dead link")
+            pingSentAt = nil
+            disconnect()
+            connectOrScan()
+            return
+        }
+        if handshake?.isLive == true {
+            if probe, pingSentAt == nil, send(["t": "ping"]) { pingSentAt = Date() }
+            return
+        }
+        if peripheral == nil || peripheral?.state == .disconnected { reset(); connectOrScan(); return }
+        if let p = peripheral, p.state == .connected, rx == nil {
+            p.discoverServices([Proto.service]) // the service may have appeared since the last look
+            return
+        }
+        if !manager.isScanning {
+            log.notice("watchdog: scan was off, restarting")
+            manager.scanForPeripherals(withServices: [Proto.service], options: nil)
+        }
+    }
+
     private func connectOrScan() {
         guard manager.state == .poweredOn, peripheral == nil else { return }
         if pairing == nil, store.peer == nil { return }
@@ -112,6 +148,7 @@ final class Central: NSObject {
     }
 
     private func reset() {
+        pingSentAt = nil
         peripheral = nil
         rx = nil
         handshake = nil
@@ -176,6 +213,8 @@ final class Central: NSObject {
                     send(["t": "sync", "kind": kind, "cursor": store.cursors[kind] ?? NSNull(), "limit": 200])
                 }
                 if store.contacts.isEmpty { refreshContacts() }
+            case .message(let m) where m.str("t") == "pong":
+                pingSentAt = nil
             case .message(let m):
                 let contactsNowAllowed = m.str("t") == "status"
                     && (m["perms"] as? [String: Any])?["contacts"] as? Bool == true
@@ -301,7 +340,12 @@ extension Central: CBCentralManagerDelegate {
 extension Central: CBPeripheralDelegate {
     nonisolated func peripheral(_ p: CBPeripheral, didDiscoverServices error: Error?) {
         MainActor.assumeIsolated {
-            guard let s = p.services?.first(where: { $0.uuid == Proto.service }) else { disconnect(); return }
+            // Bonded, iOS may reconnect before Android's iBridge service is up. Keep the link and look again:
+            // didModifyServices or the watchdog retries discovery.
+            guard let s = p.services?.first(where: { $0.uuid == Proto.service }) else {
+                log.notice("connected, but Android's iBridge service isn't there yet; waiting")
+                return
+            }
             p.discoverCharacteristics([Proto.rx, Proto.tx], for: s)
         }
     }
@@ -326,6 +370,19 @@ extension Central: CBPeripheralDelegate {
             do {
                 if let packet = try deframer.feed(chunk) { handle(try h.receive(packet)) }
             } catch { fail(error) }
+        }
+    }
+
+    nonisolated func peripheral(_ p: CBPeripheral, didModifyServices invalidatedServices: [CBService]) {
+        MainActor.assumeIsolated {
+            log.notice("Android's services changed")
+            if invalidatedServices.contains(where: { $0.uuid == Proto.service }) {
+                // Android's iBridge restarted under us: the old session is gone.
+                disconnect()
+                connectOrScan()
+            } else if rx == nil {
+                p.discoverServices([Proto.service]) // maybe iBridge's service just appeared
+            }
         }
     }
 

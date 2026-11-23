@@ -35,6 +35,12 @@ $A shell dumpsys bluetooth_manager | grep -A1 mAdvertisingServiceUuids          
 - Decode the pairing QR from a screenshot: `../../android/gradlew -p tools/interop decodeQr -q --args=$PWD/design/evidence/android-pairing.png`, then `tools/interop/build/ios-side parse "<uri>"` must exit 0.
 - Compare screenshots with design/mockups/*.dc.html in a sub-agent (image analysis never runs in the lead).
 
+## 2b. Reconnect test (locked iPhone)
+- iPhone log over USB: `idevicesyslog -p iBridge` (libimobiledevice). Link lines: discovered / connected / live / link lost.
+- Restart Android's side: `$A shell am force-stop app.ibridge.android` then `$A shell am start-foreground-service -n app.ibridge.android/app.ibridge.service.BridgeService` (the class lives in namespace `app.ibridge`, not the package). Check `logcat` shows iBridge lines, or the test measured nothing.
+- Wait for `← hello` in `$A logcat -s iBridge`; message types are logged as → / ←.
+- Who is scanning on the iPhone: `idevicesyslog | grep ScanParams` lists scan agents.
+
 ## 3. iOS (no Xcode here)
 Push to `main` of the private repo behkha/ibridge; `.github/workflows/build.yml` builds the Simulator app with XcodeGen and runs `scripts/ios-screenshots.sh` (Main, A-Calls, A-Persian via `-demo`).
 ```bash

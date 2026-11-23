@@ -16,6 +16,8 @@ Byte order is big-endian. `||` is concatenation. Public keys are P-256 in uncomp
 | `RX` (I → A) | `e38d0002-747f-44a1-b7fc-4a024772eb87` | Write, Write Without Response |
 | `TX` (A → I) | `e38d0003-747f-44a1-b7fc-4a024772eb87` | Notify (CCCD `2902`) |
 
+`RX` writes and the `TX` CCCD require an **encrypted link**, so the first connection makes the phones bond at the OS level (LE Secure Connections, one system prompt on each phone). The bond is for reconnection, not secrecy: with Android's identity key iOS resolves its rotating address, and a pending `connect` completes even while iBridge is suspended. All protection still comes from sections 4 and 5.
+
 - **Advertising**: A advertises the 128-bit service UUID, connectable, no name, `ADVERTISE_MODE_LOW_POWER` while linked or idle and `LOW_LATENCY` while the pairing sheet is open. iOS background scans must filter on this UUID.
 - **Identity** is proven by the handshake, not by the address: Android rotates its address. I caches the peripheral identifier of the last good link and calls `connect` on it (pending connects never time out on iOS). If a handshake with some peripheral fails with `NOT_PAIRED`, I ignores that identifier for 15 minutes.
 - **One link at a time**: A's GATT server sees every LE link the phone has (watches, earbuds), so a central takes A's single iBridge slot only when it subscribes to `TX` or writes `RX`. Another central that does either while the slot is taken is disconnected. A central with no live session 20 s after taking the slot is disconnected. A keeps advertising until a session is live.
