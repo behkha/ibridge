@@ -18,3 +18,4 @@ tools/interop/build/
 tools/interop/.gradle/
 tools/interop/.kotlin/
 android/.kotlin/
+research/
