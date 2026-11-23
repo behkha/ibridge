@@ -20,6 +20,7 @@ Goal: iBridge, our own take on iTell (itellapp.com). An Android phone holds the 
 - Toolchain: Temurin 21 (~/Library/Java), Android SDK 35, Gradle 8.11.1, libimobiledevice. REA local.
 - iTell APK in research/target; duplicate in research/artifacts (delete only with the user's OK).
 
+- Verified on real phones 2026-11-24: send text, OTP code card, call alert + Decline, full history. OS bond added (encrypted GATT).
 - END TO END WORKS (2026-11-23): iPhone 17 (iOS 27.2.1) paired with the S21 Ultra by QR; full text + call history synced; background reconnect in ~11 s after Android restart (idevicesyslog).
 - iPhone install: free Apple ID + AltServer 1.8.4 (notarized, ~/Applications), hold Option on its menu → Sideload .ipa → build-ipa/iBridge-unsigned.ipa from CI artifact `ios-ipa-unsigned`. Re-sign every 7 days. Wi-Fi path to AltServer is blocked here; USB works.
 - Repo made public (user's choice) after stripping research/ and switching commit email to no-reply. iOS CI often waits for Apple-silicon runners; re-run when cancelled.
@@ -33,9 +34,9 @@ Goal: iBridge, our own take on iTell (itellapp.com). An Android phone holds the 
 - No unit tests (user rule). Verify by building and running on real devices/emulator/simulator.
 
 ## Next
-1. Live-use checks on the real phones: OTP code card, incoming-call alert + Decline/Text back, sending a text from the iPhone, long out-of-range periods.
-2. Design review for screens without mockups: iPhone pairing, conversation, Keypad, Contacts, Settings; Android "waiting" home card.
-3. Faster first sync (newest texts first).
+1. Background reconnect of a locked iPhone: fails (see docs/notes/background-reconnect.md; hypotheses ranked there, #4 and #3 first).
+2. Test "Text back" from the call notification.
+3. Design review for screens without mockups: iPhone pairing, conversation, Keypad, Contacts, Settings; Android "waiting" card.
 
 ## Open questions
 - Long term: 7-day free signing is fine for testing; a paid Apple account would allow TestFlight.
