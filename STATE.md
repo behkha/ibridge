@@ -21,7 +21,7 @@ Goal: iBridge, our own take on iTell (itellapp.com). An Android phone holds the 
 - iTell APK in research/target; duplicate in research/artifacts (delete only with the user's OK).
 
 - Verified on real phones 2026-11-24: send text, OTP code card, call alert + Decline, full history. OS bond added (encrypted GATT).
-- END TO END WORKS (2026-11-23): iPhone 17 (iOS 27.2.1) paired with the S21 Ultra by QR; full text + call history synced; background reconnect in ~11 s after Android restart (idevicesyslog).
+- 2026-11-23: iPhone 17 (iOS 27.2.1) paired with the S21 Ultra by QR.
 - iPhone install: free Apple ID + AltServer 1.8.4 (notarized, ~/Applications), hold Option on its menu → Sideload .ipa → build-ipa/iBridge-unsigned.ipa from CI artifact `ios-ipa-unsigned`. Re-sign every 7 days. Wi-Fi path to AltServer is blocked here; USB works.
 - Repo made public (user's choice) after stripping research/ and switching commit email to no-reply. iOS CI often waits for Apple-silicon runners; re-run when cancelled.
 
