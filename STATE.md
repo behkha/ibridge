@@ -10,7 +10,6 @@ Goal: iBridge, our own take on iTell (itellapp.com). An Android phone holds the 
   - A denied row turns orange without blocking the others, and the home screen reuses the list for warnings.
   - The QR is always black on white, expires with a countdown, and has a fallback code, LTR even in RTL.
 - Toolchain install approved 2026-11-23. Devices: Android 12+ phone, iOS 17+ iPhone.
-
 ## Done
 - docs/PROTOCOL.md v1: GATT `e38d0001…`, chunk framing, QR + typed-code pairing (5×6-bit rounds, Android reveals first), triple-DH session, JSON messages.
 - android/ (Kotlin, Compose, minSdk 31) runs on the user's Galaxy S21 Ultra (Android 15, USB): checklist, pairing sheet with a QR that decodes and parses on Swift, foreground service, BLE advertising. Matches E-Checklist/E-QR.
