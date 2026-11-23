@@ -1,0 +1,27 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-11-23T16:20:00Z"},
+  "title": "iBridge design options",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 390, "h": 844, "title": "A Companion: Messages"},
+    "A-Calls.dc.html": {"x": 470, "y": 0, "w": 390, "h": 844, "title": "A Companion: out of reach"},
+    "B-Messages.dc.html": {"x": 1020, "y": 0, "w": 390, "h": 844, "title": "B Tether: Messages"},
+    "B-Calls.dc.html": {"x": 1490, "y": 0, "w": 390, "h": 844, "title": "B Tether: out of reach"},
+    "C-Timeline.dc.html": {"x": 2040, "y": 0, "w": 390, "h": 844, "title": "C Ledger: Everything"},
+    "C-Offline.dc.html": {"x": 2510, "y": 0, "w": 390, "h": 844, "title": "C Ledger: out of reach"},
+    "A-Persian.dc.html": {"x": 3060, "y": 0, "w": 390, "h": 844, "title": "A Companion in Persian (RTL)"},
+    "D-Permissions.dc.html": {"x": 0, "y": 1300, "w": 390, "h": 844, "title": "Wizard: one permission"},
+    "D-QR.dc.html": {"x": 470, "y": 1300, "w": 390, "h": 844, "title": "Wizard: pairing code"},
+    "E-Checklist.dc.html": {"x": 1020, "y": 1300, "w": 390, "h": 844, "title": "Checklist: permissions"},
+    "E-QR.dc.html": {"x": 1490, "y": 1300, "w": 390, "h": 844, "title": "Checklist: pairing code"},
+    "F-Status.dc.html": {"x": 2040, "y": 1300, "w": 390, "h": 844, "title": "Checklist: home after setup"}
+  },
+  "order": ["Main.dc.html", "A-Calls.dc.html", "B-Messages.dc.html", "B-Calls.dc.html", "C-Timeline.dc.html", "C-Offline.dc.html", "A-Persian.dc.html", "D-Permissions.dc.html", "D-QR.dc.html", "E-Checklist.dc.html", "E-QR.dc.html", "F-Status.dc.html"],
+  "notes": {
+    "iphone": {"x": 0, "y": -300, "text": "iPhone app: overall direction", "kind": "title1", "maxW": 3450},
+    "android": {"x": 0, "y": 1000, "text": "Android app: setup flow", "kind": "title1", "maxW": 2430}
+  },
+  "designSystems": []
+}

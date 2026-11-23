@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Android home after setup</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1D5BD8}a:hover{color:#1546A8}
+button{font:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; padding: 48px 16px 24px; background: #FBFBFD; color: #0E1A2B; font-family: 'Roboto', system-ui, sans-serif; display: flex; flex-direction: column; gap: 16px">
+  <h1 style="margin: 0; padding: 0 8px; font-size: 28px; line-height: 36px; font-weight: 500">iBridge</h1>
+
+  <div role="status" style="padding: 20px; border-radius: 24px; background: #E6F4EC; color: #0F4D31; display: flex; flex-direction: column; gap: 14px">
+    <svg width="64" height="20" viewBox="0 0 64 20" aria-hidden="true"><circle cx="10" cy="10" r="8" fill="#137A4B"></circle><line x1="18" y1="10" x2="46" y2="10" stroke="#137A4B" stroke-width="3"></line><circle cx="54" cy="10" r="8" fill="#137A4B"></circle></svg>
+    <div style="display: flex; flex-direction: column; gap: 4px">
+      <div style="font-size: 22px; line-height: 28px; font-weight: 500">Linked to iPhone 15</div>
+      <div style="font-size: 15px; line-height: 22px">Encrypted. Last message sent 2 minutes ago.</div>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+      <div style="padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.7)"><div style="font-size: 20px; font-weight: 500">148</div><div style="font-size: 13px">texts today</div></div>
+      <div style="padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.7)"><div style="font-size: 20px; font-weight: 500">6</div><div style="font-size: 13px">calls today</div></div>
+      <div style="padding: 10px 12px; border-radius: 14px; background: rgba(255, 255, 255, 0.7)"><div style="font-size: 20px; font-weight: 500">Strong</div><div style="font-size: 13px">signal</div></div>
+    </div>
+  </div>
+
+  <div style="padding: 14px 16px; border-radius: 18px; background: #FFFFFF; border: 1px solid #F2C9A0; display: flex; align-items: center; gap: 14px">
+    <div style="width: 40px; height: 40px; flex: none; border-radius: 20px; background: #FFF1E0; display: flex; align-items: center; justify-content: center">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A65300" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 7v6M12 16.5h.01"></path></svg>
+    </div>
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+      <div style="font-size: 16px; font-weight: 500">Contacts not allowed</div>
+      <div style="font-size: 14px; line-height: 19px; color: #7A3E00">Your iPhone shows numbers instead of names.</div>
+    </div>
+    <button style="height: 40px; padding: 0 16px; border: 0; border-radius: 20px; background: #FFF1E0; color: #7A3E00; font-size: 14px; font-weight: 500">Settings</button>
+  </div>
+
+  <div style="border-radius: 18px; background: #FFFFFF; border: 1px solid #E3E6EB; display: flex; flex-direction: column">
+    <a href="#" style="padding: 17px 16px; display: flex; align-items: center; border-bottom: 1px solid #EDEFF2; color: #0E1A2B; text-decoration: none; font-size: 16px">Permissions and battery</a>
+    <a href="#" style="padding: 17px 16px; display: flex; align-items: center; border-bottom: 1px solid #EDEFF2; color: #0E1A2B; text-decoration: none; font-size: 16px">Pair a different iPhone</a>
+    <a href="#" style="padding: 17px 16px; display: flex; align-items: center; color: #C4001A; text-decoration: none; font-size: 16px">Unlink iPhone 15</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

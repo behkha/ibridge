@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Checklist: pairing sheet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1D5BD8}a:hover{color:#1546A8}
+button{font:inherit}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; box-sizing: border-box; background: #FBFBFD; color: #0E1A2B; font-family: 'Roboto', system-ui, sans-serif; overflow: hidden">
+  <div aria-hidden="true" style="padding: 48px 24px; display: flex; flex-direction: column; gap: 10px">
+    <div style="font-size: 28px; line-height: 36px; font-weight: 500">Set up this phone</div>
+    <div style="height: 68px; border-radius: 18px; background: #FFFFFF; border: 1px solid #E3E6EB"></div>
+    <div style="height: 68px; border-radius: 18px; background: #FFFFFF; border: 1px solid #E3E6EB"></div>
+  </div>
+  <div aria-hidden="true" style="position: absolute; inset: 0; background: rgba(14, 26, 43, 0.4)"></div>
+
+  <div role="dialog" aria-label="Pair your iPhone" style="position: absolute; left: 0; right: 0; bottom: 0; padding: 12px 24px 28px; border-radius: 28px 28px 0 0; background: #FFFFFF; display: flex; flex-direction: column; align-items: center; gap: 16px">
+    <div aria-hidden="true" style="width: 36px; height: 4px; border-radius: 2px; background: #C9CED6"></div>
+    <div style="align-self: stretch; display: flex; flex-direction: column; gap: 6px">
+      <h2 style="margin: 0; font-size: 24px; line-height: 32px; font-weight: 500">Pair your iPhone</h2>
+      <p style="margin: 0; font-size: 15px; line-height: 22px; color: #3F4A5A">Open iBridge on the iPhone and scan this.</p>
+    </div>
+    <div role="img" aria-label="Pairing QR code" style="padding: 14px; border-radius: 18px; border: 1px solid #E3E6EB; display: grid; grid-template-columns: repeat(25, 9px); grid-auto-rows: 9px">
+      <sc-for list="{{ cells }}" as="c" hint-placeholder-count="625">
+        <div style="background: {{ c }}"></div>
+      </sc-for>
+    </div>
+    <div style="font-size: 15px; color: #3F4A5A">Waiting for iPhone. New code in 4:12</div>
+    <div style="align-self: stretch; padding: 12px 16px; border-radius: 14px; background: #EEF0F3; display: flex; align-items: center; gap: 12px">
+      <div style="flex: 1; font-size: 14px; color: #3F4A5A">Can’t scan? Type this</div>
+      <div dir="ltr" style="font-size: 20px; font-weight: 700; letter-spacing: 2px">K7Q 29M</div>
+    </div>
+    <button style="align-self: stretch; height: 48px; border: 0; border-radius: 24px; background: transparent; color: #1D5BD8; font-size: 16px; font-weight: 500">Back to checklist</button>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var n = 25, out = [], seed = 7;
+    function rnd() { seed = (seed * 16807) % 2147483647; return seed / 2147483647; }
+    function finder(r, c) {
+      var spots = [[0, 0], [0, n - 7], [n - 7, 0]];
+      for (var i = 0; i < 3; i++) {
+        var y = r - spots[i][0], x = c - spots[i][1];
+        if (y >= -1 && y <= 7 && x >= -1 && x <= 7) {
+          if (y < 0 || x < 0 || y > 6 || x > 6) return 0;
+          if (y === 0 || y === 6 || x === 0 || x === 6) return 1;
+          if (y >= 2 && y <= 4 && x >= 2 && x <= 4) return 1;
+          return 0;
+        }
+      }
+      return -1;
+    }
+    for (var r = 0; r < n; r++) {
+      for (var c = 0; c < n; c++) {
+        var f = finder(r, c);
+        var on = f === -1 ? (r === 6 || c === 6 ? (r + c) % 2 === 0 : rnd() > 0.52) : f === 1;
+        out.push(on ? '#0E1A2B' : '#FFFFFF');
+      }
+    }
+    return { cells: out };
+  }
+}
+</script>
+</body>
+</html>

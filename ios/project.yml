@@ -1,0 +1,48 @@
+name: iBridge
+options:
+  bundleIdPrefix: app.ibridge
+  deploymentTarget:
+    iOS: "17.0"
+  developmentLanguage: en
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    CODE_SIGNING_ALLOWED: "NO"
+    CODE_SIGN_IDENTITY: ""
+    TARGETED_DEVICE_FAMILY: "1"
+    SWIFT_EMIT_LOC_STRINGS: "YES"
+    LOCALIZATION_PREFERS_STRING_CATALOGS: "YES"
+targets:
+  iBridge:
+    type: application
+    platform: iOS
+    sources:
+      - path: iBridge
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.ibridge.ios
+        PRODUCT_NAME: iBridge
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    info:
+      path: iBridge/Info.plist
+      properties:
+        CFBundleDisplayName: iBridge
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, fa]
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIBackgroundModes: [bluetooth-central]
+        NSBluetoothAlwaysUsageDescription: iBridge talks to your Android phone over Bluetooth to bring its texts and calls here.
+        NSCameraUsageDescription: iBridge scans the pairing code shown on your Android phone.
+        UIAppFonts: [Vazirmatn-Regular.ttf, Vazirmatn-Medium.ttf, Vazirmatn-SemiBold.ttf, Vazirmatn-Bold.ttf]
+schemes:
+  iBridge:
+    build:
+      targets:
+        iBridge: all
+    run:
+      config: Debug

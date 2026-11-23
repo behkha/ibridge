@@ -1,0 +1,526 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Messages": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "پیام‌ها"
+          }
+        }
+      }
+    },
+    "Calls": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "تماس‌ها"
+          }
+        }
+      }
+    },
+    "Keypad": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "شماره‌گیر"
+          }
+        }
+      }
+    },
+    "Contacts": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "مخاطبین"
+          }
+        }
+      }
+    },
+    "Settings": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "تنظیمات"
+          }
+        }
+      }
+    },
+    "Search": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "جستجو"
+          }
+        }
+      }
+    },
+    "Out of reach": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "دور از دسترس"
+          }
+        }
+      }
+    },
+    "Connecting": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "در حال اتصال"
+          }
+        }
+      }
+    },
+    "Pair": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "جفت کردن"
+          }
+        }
+      }
+    },
+    "Copy": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "کپی"
+          }
+        }
+      }
+    },
+    "Copied": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "کپی شد"
+          }
+        }
+      }
+    },
+    "just now": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "همین حالا"
+          }
+        }
+      }
+    },
+    "Code from %@, %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "کد از %1$@، %2$@"
+          }
+        }
+      }
+    },
+    "All": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "همه"
+          }
+        }
+      }
+    },
+    "Missed": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "بی‌پاسخ"
+          }
+        }
+      }
+    },
+    "Yesterday": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "دیروز"
+          }
+        }
+      }
+    },
+    "Filter": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "فیلتر"
+          }
+        }
+      }
+    },
+    "%@ is out of reach since %@. Calling needs it nearby.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ از %2$@ دور از دسترس است. برای تماس باید نزدیک باشد."
+          }
+        }
+      }
+    },
+    "%@ is out of reach since %@. Texts arrive when it’s back.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%1$@ از %2$@ دور از دسترس است. پیام‌ها وقتی برگردد می‌رسند."
+          }
+        }
+      }
+    },
+    "Outgoing, SIM %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "خروجی، سیم %@"
+          }
+        }
+      }
+    },
+    "Incoming, SIM %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ورودی، سیم %@"
+          }
+        }
+      }
+    },
+    "Declined, SIM %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ردشده، سیم %@"
+          }
+        }
+      }
+    },
+    "Missed, SIM %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "بی‌پاسخ، سیم %@"
+          }
+        }
+      }
+    },
+    "Linked to %@, encrypted": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "متصل به %@، رمزنگاری‌شده"
+          }
+        }
+      }
+    },
+    "%@ out of reach": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ دور از دسترس"
+          }
+        }
+      }
+    },
+    "Connecting to %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "در حال اتصال به %@"
+          }
+        }
+      }
+    },
+    "Pair with your Android phone": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "جفت کردن با گوشی اندروید"
+          }
+        }
+      }
+    },
+    "Call back, not available yet": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "تماس دوباره، هنوز ممکن نیست"
+          }
+        }
+      }
+    },
+    "Text": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "پیام"
+          }
+        }
+      }
+    },
+    "Delete": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "حذف"
+          }
+        }
+      }
+    },
+    "To": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "به"
+          }
+        }
+      }
+    },
+    "New text": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "پیام تازه"
+          }
+        }
+      }
+    },
+    "Cancel": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "لغو"
+          }
+        }
+      }
+    },
+    "Send": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ارسال"
+          }
+        }
+      }
+    },
+    "Phone": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "گوشی"
+          }
+        }
+      }
+    },
+    "Battery": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "باتری"
+          }
+        }
+      }
+    },
+    "SIM %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "سیم %@"
+          }
+        }
+      }
+    },
+    "Pair again": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "جفت کردن دوباره"
+          }
+        }
+      }
+    },
+    "Unlink %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "قطع اتصال %@"
+          }
+        }
+      }
+    },
+    "Unlink %@?": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "اتصال %@ قطع شود؟"
+          }
+        }
+      }
+    },
+    "Unlink": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "قطع اتصال"
+          }
+        }
+      }
+    },
+    "This iPhone stops getting texts and calls until you pair again.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "این آیفون تا جفت کردن دوباره پیام و تماسی نمی‌گیرد."
+          }
+        }
+      }
+    },
+    "Pair with Android": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "جفت کردن با اندروید"
+          }
+        }
+      }
+    },
+    "Scan instead": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "اسکن کنید"
+          }
+        }
+      }
+    },
+    "Type code instead": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "کد را تایپ کنید"
+          }
+        }
+      }
+    },
+    "Linking": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "در حال اتصال"
+          }
+        }
+      }
+    },
+    "No camera": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "دوربین در دسترس نیست"
+          }
+        }
+      }
+    },
+    "The code didn’t match. Check it and try again.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "کد درست نبود. دوباره بررسی و امتحان کنید."
+          }
+        }
+      }
+    },
+    "Too many tries. Reopen the pairing code on Android.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "تلاش‌ها زیاد شد. کد جفت کردن را در اندروید دوباره باز کنید."
+          }
+        }
+      }
+    },
+    "Decline": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "رد کردن"
+          }
+        }
+      }
+    },
+    "Text back": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "پاسخ با پیام"
+          }
+        }
+      }
+    },
+    "Calling your Android phone": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "با گوشی اندرویدتان تماس می‌گیرد"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

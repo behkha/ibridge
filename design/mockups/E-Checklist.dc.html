@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Checklist: permissions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1D5BD8}a:hover{color:#1546A8}
+button{font:inherit}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; padding: 48px 16px 24px; background: #FBFBFD; color: #0E1A2B; font-family: 'Roboto', system-ui, sans-serif; display: flex; flex-direction: column; gap: 16px">
+  <div style="padding: 0 8px; display: flex; flex-direction: column; gap: 6px">
+    <h1 style="margin: 0; font-size: 28px; line-height: 36px; font-weight: 500">Set up this phone</h1>
+    <p style="margin: 0; font-size: 15px; line-height: 22px; color: #3F4A5A">Everything stays on your two phones. Nothing goes through a server.</p>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-direction: column; gap: 8px">
+    <sc-for list="{{ rows }}" as="r" hint-placeholder-count="6">
+      <div style="padding: 14px 16px; border-radius: 18px; background: #FFFFFF; border: 1px solid {{ r.border }}; display: flex; align-items: center; gap: 14px">
+        <div style="width: 40px; height: 40px; flex: none; border-radius: 20px; background: {{ r.badgeBg }}; display: flex; align-items: center; justify-content: center">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="{{ r.badgeFg }}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ r.badgePath }}"></path></svg>
+        </div>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+          <div style="font-size: 16px; font-weight: 500">{{ r.title }}</div>
+          <div style="font-size: 14px; line-height: 19px; color: {{ r.noteColor }}">{{ r.note }}</div>
+        </div>
+        <sc-if value="{{ r.action }}" hint-placeholder-val="{{ true }}">
+          <button style="height: 40px; padding: 0 16px; border: 0; border-radius: 20px; background: {{ r.btnBg }}; color: {{ r.btnFg }}; font-size: 14px; font-weight: 500; white-space: nowrap">{{ r.action }}</button>
+        </sc-if>
+      </div>
+    </sc-for>
+  </div>
+
+  <button style="height: 56px; border: 0; border-radius: 28px; background: #1D5BD8; color: #FFFFFF; font-size: 17px; font-weight: 500">Show pairing code</button>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var check = 'M5 12.5l4.5 4.5L19 7.5';
+    var dot = 'M12 12h.01';
+    var warn = 'M12 7v6M12 16.5h.01';
+    function done(t, n) { return { title: t, note: n, noteColor: '#5B6472', border: '#E3E6EB', badgeBg: '#E6F4EC', badgeFg: '#137A4B', badgePath: check, action: '', btnBg: '', btnFg: '' }; }
+    function todo(t, n, a) { return { title: t, note: n, noteColor: '#5B6472', border: '#E3E6EB', badgeBg: '#EEF0F3', badgeFg: '#6B7380', badgePath: dot, action: a, btnBg: '#1D5BD8', btnFg: '#FFFFFF' }; }
+    function denied(t, n, a) { return { title: t, note: n, noteColor: '#7A3E00', border: '#F2C9A0', badgeBg: '#FFF1E0', badgeFg: '#A65300', badgePath: warn, action: a, btnBg: '#FFF1E0', btnFg: '#7A3E00' }; }
+    return {
+      rows: [
+        done('Texts and codes', 'Read and send texts from this SIM'),
+        done('Calls and call history', 'Show who is calling and past calls'),
+        denied('Contacts', 'Denied. Your iPhone will show numbers instead of names.', 'Settings'),
+        todo('Nearby devices', 'Keep the Bluetooth link to your iPhone', 'Allow'),
+        todo('Notifications', 'Shows that iBridge is running', 'Allow'),
+        todo('Unrestricted battery', 'Stops Android from closing iBridge in your bag', 'Open')
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

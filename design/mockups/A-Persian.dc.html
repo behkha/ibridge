@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>A Companion in Persian</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#1D5BD8}a:hover{color:#1546A8}
+button{font:inherit}
+</style>
+</helmet>
+<div dir="rtl" style="width: 390px; height: 844px; box-sizing: border-box; background: #FFFFFF; color: #0E1A2B; font-family: 'Vazirmatn', -apple-system, sans-serif; display: flex; flex-direction: column; overflow: hidden">
+  <div style="padding: 58px 16px 8px; display: flex; flex-direction: column; gap: 10px">
+    <div style="display: flex; justify-content: flex-end">
+      <button aria-label="متصل به Pixel 8a، رمزنگاری‌شده" style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px 0 12px; border: 0; border-radius: 16px; background: #E6F4EC; color: #0F5E3A; font-size: 14px; font-weight: 600">
+        <svg width="30" height="12" viewBox="0 0 30 12" aria-hidden="true"><circle cx="5" cy="6" r="4" fill="#137A4B"></circle><line x1="9" y1="6" x2="21" y2="6" stroke="#137A4B" stroke-width="2"></line><circle cx="25" cy="6" r="4" fill="#137A4B"></circle></svg>
+        <span dir="ltr">Pixel 8a</span>
+      </button>
+    </div>
+    <h1 style="margin: 0; font-size: 32px; line-height: 46px; font-weight: 700">پیام‌ها</h1>
+    <label style="display: flex; align-items: center; gap: 6px; height: 38px; padding: 0 8px; border-radius: 10px; background: #EEF0F3; color: #6B7380; font-size: 16px">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B7380" stroke-width="2.2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="16.5" y1="16.5" x2="21" y2="21"></line></svg>
+      <input aria-label="جستجو" placeholder="جستجو" style="border: 0; background: transparent; font: inherit; color: #0E1A2B; outline: none; flex: 1">
+    </label>
+  </div>
+
+  <div style="margin: 6px 16px 10px; padding: 12px 16px; border-radius: 16px; background: #F1F5FE; display: flex; align-items: center; gap: 12px">
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 2px">
+      <div style="font-size: 13px; color: #3F4A5A">کد از ۳۰۰۰۴۵۰۵، همین حالا</div>
+      <div dir="ltr" style="text-align: right; font-size: 32px; line-height: 40px; font-weight: 700; letter-spacing: 3px; color: #0E1A2B">۴۸۲ ۹۱۳</div>
+    </div>
+    <button style="height: 40px; padding: 0 18px; border: 0; border-radius: 20px; background: #1D5BD8; color: #FFFFFF; font-size: 16px; font-weight: 600">کپی</button>
+  </div>
+
+  <div style="flex: 1; display: flex; flex-direction: column">
+    <sc-for list="{{ rows }}" as="r" hint-placeholder-count="6">
+      <div style="display: flex; gap: 12px; padding: 8px 16px 0">
+        <div style="width: 48px; height: 48px; flex: none; border-radius: 24px; background: {{ r.tint }}; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 600">{{ r.initials }}</div>
+        <div style="flex: 1; min-width: 0; border-bottom: 1px solid #E3E6EB; padding-bottom: 8px; display: flex; flex-direction: column; gap: 0">
+          <div style="display: flex; align-items: baseline; gap: 8px">
+            <div style="flex: 1; font-size: 16px; line-height: 26px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{ r.name }}</div>
+            <div style="font-size: 14px; color: #6B7380">{{ r.time }}</div>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: flex-start">
+            <div style="flex: 1; font-size: 14px; line-height: 23px; color: #5B6472; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden">{{ r.text }}</div>
+            <sc-if value="{{ r.unread }}" hint-placeholder-val="{{ true }}">
+              <div style="min-width: 22px; height: 22px; padding: 0 6px; box-sizing: border-box; border-radius: 11px; background: #1D5BD8; color: #FFFFFF; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center">{{ r.unread }}</div>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+
+  <nav aria-label="زبانه‌ها" style="height: 83px; box-sizing: border-box; padding-top: 7px; border-top: 1px solid #E3E6EB; background: #F9FAFB; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr))">
+    <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="5">
+      <a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; color: {{ t.color }}; font-size: 11px; font-weight: 500">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{ t.path }}"></path></svg>
+        {{ t.label }}
+      </a>
+    </sc-for>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var on = '#1D5BD8', off = '#7A8291';
+    var P = {
+      msg: 'M20 5H4v11h11l5 4z',
+      call: 'M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a1 1 0 0 1-1 1A16 16 0 0 1 4 5a1 1 0 0 1 1-1z',
+      pad: 'M6 5h.01M12 5h.01M18 5h.01M6 11h.01M12 11h.01M18 11h.01M6 17h.01M12 17h.01M18 17h.01',
+      person: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0',
+      gear: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6a7 7 0 0 0 0 2.4l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2z'
+    };
+    return {
+      rows: [
+        { initials: 'س', tint: '#5E6AD2', name: 'سارا احمدی', time: '۱۴:۰۸', text: 'دم ساختمونم، درِ آبی کنار داروخانه', unread: '۲' },
+        { initials: '۳۰', tint: '#8A93A3', name: '۳۰۰۰۴۵۰۵', time: '۱۴:۰۷', text: 'کد ورود شما ۴۸۲۹۱۳ است. آن را به کسی ندهید.', unread: '' },
+        { initials: 'م', tint: '#C2569B', name: 'مامان', time: '۱۳:۴۱', text: 'ناهار خوردی؟ وقت کردی زنگ بزن', unread: '۱' },
+        { initials: 'ر', tint: '#2E8C83', name: 'رضا کریمی', time: '۱۱:۲۰', text: 'فاکتور رو فرستادم، واریز فردا صبح می‌رسه', unread: '' },
+        { initials: 'پ', tint: '#B0702A', name: 'پیک', time: 'دیروز', text: 'بستهٔ شما بین ساعت ۱۶ تا ۱۹ تحویل داده می‌شود', unread: '' },
+        { initials: 'ن', tint: '#6A7B2E', name: 'ندا جعفری', time: 'دیروز', text: 'آره حتماً، پنجشنبه می‌بینمت', unread: '' }
+      ],
+      tabs: [
+        { label: 'پیام‌ها', path: P.msg, color: on },
+        { label: 'تماس‌ها', path: P.call, color: off },
+        { label: 'شماره‌گیر', path: P.pad, color: off },
+        { label: 'مخاطبین', path: P.person, color: off },
+        { label: 'تنظیمات', path: P.gear, color: off }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
