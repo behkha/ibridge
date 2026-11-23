@@ -32,6 +32,20 @@ jobs:
         with:
           name: ios-screenshots
           path: screenshots/
+      # Unsigned device build. Sideloadly (or Xcode) signs it with the user's free Apple ID at install time.
+      - name: Build unsigned iPhone app (.ipa)
+        run: |
+          xcodebuild -project ios/iBridge.xcodeproj -scheme iBridge -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build-device CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build > device.log 2>&1 \
+            || { grep -E "error:" device.log | head -40; tail -30 device.log; exit 1; }
+          mkdir -p Payload && cp -R build-device/Build/Products/Release-iphoneos/iBridge.app Payload/
+          zip -qry iBridge-unsigned.ipa Payload
+          ls -la iBridge-unsigned.ipa
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-ipa-unsigned
+          path: iBridge-unsigned.ipa
 
   android:
     runs-on: ubuntu-latest
