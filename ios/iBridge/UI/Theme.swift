@@ -54,13 +54,21 @@ enum Fmt {
     /// "14:08" today, "Yesterday", a weekday this week, else a short date. 24-hour as in the mockups.
     static func when(_ d: Date) -> String {
         let cal = Calendar.current
-        if cal.isDateInToday(d) { return d.formatted(Date.FormatStyle().hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)) }
+        if cal.isDateInToday(d) { return time(d) }
         if cal.isDateInYesterday(d) { return String(localized: "Yesterday") }
         if let days = cal.dateComponents([.day], from: d, to: Date()).day, days < 7 { return d.formatted(.dateTime.weekday(.wide)) }
         return d.formatted(date: .numeric, time: .omitted)
     }
 
-    static func time(_ d: Date) -> String { d.formatted(Date.FormatStyle().hour(.twoDigits(amPM: .omitted)).minute(.twoDigits)) }
+    /// Fixed 24-hour "HH:mm" as in the mockups; the locale still supplies the digits (۱۴:۰۸ in Persian).
+    private static let clock: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    static func time(_ d: Date) -> String { clock.string(from: d) }
 
     /// Locale digits (Persian digits in Persian).
     static func digits(_ s: String) -> String {

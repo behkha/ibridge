@@ -18,6 +18,12 @@ final class Store {
     /// Avatar colour per address, assigned in order of first sight and kept.
     var tints: [String: Int] = [:]
     var cursors: [String: String] = [:]
+    /// Kinds with a paged sync in flight; live items must not move their cursor past unfetched pages.
+    var syncing: Set<String> = []
+    /// Public key of the Android phone whose texts and calls are stored here.
+    var dataOwner: Data?
+    /// A one-off problem to show the user, e.g. a text that failed to send.
+    var alert: String?
 
     var isDemo = false
 
@@ -65,23 +71,27 @@ final class Store {
         case "status":
             status = PhoneStatus(m)
         case "sms":
-            if let s = SMS(m) { insert(s, notify: true) }
+            if let s = SMS(m) { insert(s, notify: true); takeCode(m, sms: s); advance("sms", to: s.id) }
         case "otp":
             if let code = m.str("code"), let ts = m.date("ts") {
                 latestCode = OneTimeCode(sms: m.str("sms") ?? "", code: code, from: m.str("from") ?? "", ts: ts)
             }
         case "call":
-            if let c = Call(m) { calls[c.id] = c }
+            if let c = Call(m) { calls[c.id] = c; advance("calls", to: c.id) }
         case "call.ring":
             if let id = m.str("call"), let addr = m.str("addr") {
                 ringing = (id, addr, m.str("name"))
-                Notify.call(id: id, from: m.str("name") ?? addr)
+                Notify.call(id: id, from: m.str("name") ?? contactName(for: addr) ?? addr, addr: addr)
             }
         case "call.end":
             if ringing?.id == m.str("call") { ringing = nil }
             if let id = m.str("call") { Notify.clear(id) }
         case "page":
             page(m)
+        case "sent":
+            if m.bool("ok") == false {
+                alert = String(localized: "Your text wasn’t sent. Check the Android phone’s signal and try again.")
+            }
         case "unpair":
             unpair()
         default:
@@ -103,7 +113,13 @@ final class Store {
         guard let kind = m.str("kind") else { return }
         let items = m["items"] as? [[String: Any]] ?? []
         switch kind {
-        case "sms": items.compactMap(SMS.init).forEach { insert($0, notify: false) }
+        case "sms":
+            for item in items {
+                guard let s = SMS(item) else { continue }
+                // Texts that arrived while the link was down: alert for the recent unread ones only.
+                insert(s, notify: !s.read && Date().timeIntervalSince(s.ts) < 600)
+                takeCode(item, sms: s)
+            }
         case "calls": items.compactMap(Call.init).forEach { calls[$0.id] = $0 }
         case "contacts":
             let fresh = items.compactMap(Contact.init)
@@ -111,13 +127,43 @@ final class Store {
         default: return
         }
         cursors[kind] = m.str("cursor")
-        if (m.bool("more") ?? false) { onMorePages?(kind, m.str("cursor")) } else if kind == "contacts" { cursors["contacts"] = nil }
+        if (m.bool("more") ?? false) { onMorePages?(kind, m.str("cursor")) } else {
+            syncing.remove(kind)
+            if kind == "contacts" { cursors["contacts"] = nil }
+        }
     }
 
     /// Set by the central: asks Android for the next page.
     var onMorePages: ((String, String?) -> Void)?
 
+    /// The code card takes the newest code from the last 10 minutes, live or synced.
+    private func takeCode(_ d: [String: Any], sms: SMS) {
+        guard sms.incoming, let code = d.str("code"), !code.isEmpty, Date().timeIntervalSince(sms.ts) < 600,
+              latestCode.map({ $0.ts < sms.ts }) ?? true else { return }
+        latestCode = OneTimeCode(sms: sms.id, code: code, from: sms.name ?? sms.addr, ts: sms.ts)
+    }
+
+    /// Moves a sync cursor forward past a live item, unless a paged sync of that kind is still running.
+    private func advance(_ kind: String, to id: String) {
+        guard !syncing.contains(kind), let n = Int64(id) else { return }
+        let current = cursors[kind].flatMap { Int64($0.split(separator: "|").first ?? "") } ?? -1
+        guard current >= 0, n > current else { return } // no cursor yet: the first sync sets it
+        cursors[kind] = "\(n)|0"
+    }
+
+    /// A newly paired phone: drop what came from a different one.
+    func adopt(_ p: PairedPeer) {
+        peer = p
+        if dataOwner != p.publicKey {
+            messages = [:]; calls = [:]; contacts = []; cursors = [:]; latestCode = nil; tints = [:]
+            dataOwner = p.publicKey
+        }
+        save()
+    }
+
     func unpair() {
+        cursors = [:]
+        syncing = []
         peer = nil
         link = .unpaired
         status = nil
@@ -128,6 +174,7 @@ final class Store {
 
     private struct Saved: Codable {
         var messages: [SMS]; var calls: [Call]; var contacts: [Contact]; var code: OneTimeCode?; var tints: [String: Int]; var cursors: [String: String]
+        var owner: Data?
     }
 
     private static var file: URL {
@@ -146,11 +193,12 @@ final class Store {
         latestCode = s.code
         tints = s.tints
         cursors = s.cursors
+        dataOwner = s.owner
     }
 
     func save() {
         guard !isDemo else { return }
-        let s = Saved(messages: Array(messages.values), calls: Array(calls.values), contacts: contacts, code: latestCode, tints: tints, cursors: cursors)
+        let s = Saved(messages: Array(messages.values), calls: Array(calls.values), contacts: contacts, code: latestCode, tints: tints, cursors: cursors, owner: dataOwner)
         try? JSONEncoder().encode(s).write(to: Self.file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 }
@@ -185,13 +233,13 @@ enum Notify {
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "sms-\(id)", content: n, trigger: nil))
     }
 
-    static func call(id: String, from: String) {
+    static func call(id: String, from: String, addr: String) {
         let n = UNMutableNotificationContent()
         n.title = from
         n.body = String(localized: "Calling your Android phone")
         n.sound = .default
         n.categoryIdentifier = callCategory
-        n.userInfo = ["call": id]
+        n.userInfo = ["call": id, "addr": addr]
         n.interruptionLevel = .timeSensitive
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "call-\(id)", content: n, trigger: nil))
     }

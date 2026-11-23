@@ -57,7 +57,12 @@ fun main(args: Array<String>) {
             deframer.feed(chunk)?.let { engine.onPacket(it) }
         }
     } catch (e: EOFException) {
-        exitProcess(0)
+        engine.close()
+        if (peers.peer != null) exitProcess(0)
+        // Not paired: the attempt must have replaced the code (PROTOCOL.md 4.3).
+        val replaced = Pairing.current()?.code != w.code || Pairing.locked
+        System.err.println("ANDROID hung up unpaired, code replaced: $replaced")
+        exitProcess(if (replaced) 3 else 4)
     } catch (e: ProtocolException) {
         System.err.println("ANDROID ERROR ${e.error} ${e.message}")
         send(LinkEngine.error(e.error, e.message ?: ""))

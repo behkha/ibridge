@@ -7,7 +7,7 @@ plugins {
 val core = "../../android/app/src/main/java/app/ibridge/core"
 sourceSets.main {
     kotlin.srcDirs("src")
-    kotlin.include("**/AndroidSide.kt", "**/Proto.kt", "**/Crypto.kt", "**/Pairing.kt", "**/LinkEngine.kt")
+    kotlin.include("**/AndroidSide.kt", "**/DecodeQr.kt", "**/Proto.kt", "**/Crypto.kt", "**/Pairing.kt", "**/LinkEngine.kt")
     kotlin.srcDir(core)
 }
 dependencies {
@@ -16,3 +16,10 @@ dependencies {
 }
 kotlin { jvmToolchain(21) }
 application { mainClass.set("AndroidSideKt") }
+
+// `gradlew -p tools/interop decodeQr --args=<png>` prints the text in a pairing-sheet screenshot's QR.
+dependencies { implementation("com.google.zxing:javase:3.5.3") }
+tasks.register<JavaExec>("decodeQr") {
+    classpath = sourceSets.main.get().runtimeClasspath
+    mainClass.set("DecodeQrKt")
+}

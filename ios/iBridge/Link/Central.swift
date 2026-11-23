@@ -19,6 +19,7 @@ final class Central: NSObject {
 
     /// Set while the user is pairing; cleared on success or failure.
     private var pairing: PairingStart?
+    private var pairingStarted = Date.distantPast
     /// Peripherals that answered NOT_PAIRED: someone else's iBridge. Ignored for 15 minutes.
     private var ignored: [UUID: Date] = [:]
     private var lastKnown: UUID? {
@@ -37,6 +38,8 @@ final class Central: NSObject {
 
     func pair(_ start: PairingStart) {
         pairing = start
+        pairingStarted = Date()
+        ignored = [:]
         store.pairingError = nil
         disconnect()
         connectOrScan()
@@ -66,6 +69,7 @@ final class Central: NSObject {
 
     func refreshContacts() {
         store.cursors["contacts"] = nil
+        store.syncing.insert("contacts")
         send(["t": "sync", "kind": "contacts", "cursor": NSNull(), "limit": 200])
     }
 
@@ -81,11 +85,16 @@ final class Central: NSObject {
     private func connectOrScan() {
         guard manager.state == .poweredOn, peripheral == nil else { return }
         if pairing == nil, store.peer == nil { return }
-        if pairing == nil, let id = lastKnown, let p = manager.retrievePeripherals(withIdentifiers: [id]).first {
+        if pairing == nil, let id = lastKnown, !isIgnored(id), let p = manager.retrievePeripherals(withIdentifiers: [id]).first {
             connect(p) // pending connects never time out on iOS
         }
         manager.scanForPeripherals(withServices: [Proto.service], options: nil)
         if store.peer != nil, store.link == .linked { store.link = .connecting }
+    }
+
+    private func isIgnored(_ id: UUID) -> Bool {
+        guard let t = ignored[id] else { return false }
+        return Date().timeIntervalSince(t) < 900
     }
 
     private func connect(_ p: CBPeripheral) {
@@ -150,14 +159,17 @@ final class Central: NSObject {
             case .paired(let peer):
                 pairing = nil
                 PeerStore.save(peer)
-                store.peer = peer
+                store.adopt(peer)
                 lastKnown = peripheral?.identifier
                 log.info("paired with \(peer.name, privacy: .public)")
             case .live:
                 store.link = .linked
                 lastKnown = peripheral?.identifier
                 manager.stopScan()
-                for kind in ["sms", "calls"] { send(["t": "sync", "kind": kind, "cursor": store.cursors[kind] ?? NSNull(), "limit": 200]) }
+                for kind in ["sms", "calls"] {
+                    store.syncing.insert(kind)
+                    send(["t": "sync", "kind": kind, "cursor": store.cursors[kind] ?? NSNull(), "limit": 200])
+                }
                 if store.contacts.isEmpty { refreshContacts() }
             case .message(let m):
                 let contactsNowAllowed = m.str("t") == "status"
@@ -171,10 +183,24 @@ final class Central: NSObject {
 
     private func fail(_ error: Error) {
         log.error("link failed: \(String(describing: error), privacy: .public)")
+        let id = peripheral?.identifier
         if let e = error as? LinkError {
             switch e {
             case .notPaired where pairing == nil:
-                if let id = peripheral?.identifier { ignored[id] = Date() }
+                if let id { ignored[id] = Date() }
+                // Our own Android no longer knows this iPhone: it was unlinked or reinstalled there.
+                if id != nil, id == lastKnown {
+                    lastKnown = nil
+                    store.unpair()
+                    store.pairingError = String(localized: "Your Android phone unlinked this iPhone. Pair again.")
+                }
+            case .pairingClosed where pairing != nil:
+                // Some other iBridge phone nearby, or ours with its pairing sheet closed. Keep looking for a while.
+                if let id { ignored[id] = Date() }
+                if Date().timeIntervalSince(pairingStarted) > 30 {
+                    pairing = nil
+                    store.pairingError = String(localized: "Can’t find your Android phone. Keep its pairing code open and nearby.")
+                }
             case .codeMismatch, .badProof:
                 if pairing != nil { store.pairingError = String(localized: "The code didn’t match. Check it and try again."); pairing = nil }
             case .tooManyAttempts:
@@ -198,8 +224,19 @@ final class Central: NSObject {
 extension Central: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         MainActor.assumeIsolated {
-            if central.state == .poweredOn { connectOrScan() }
-            else if store.peer != nil, store.link == .linked { lost() }
+            guard central.state == .poweredOn else {
+                // Powering off cancels connects without callbacks: forget them so power-on starts clean.
+                if store.peer != nil, store.link == .linked { store.link = .outOfReach(since: Date()) }
+                reset()
+                return
+            }
+            if let p = peripheral, handshake == nil {
+                // Relaunched by state restoration: the session keys died with the old process. Handshake again.
+                if p.state == .connected { p.discoverServices([Proto.service]) } else { connect(p) }
+                manager.scanForPeripherals(withServices: [Proto.service], options: nil)
+                return
+            }
+            connectOrScan()
         }
     }
 
@@ -214,7 +251,7 @@ extension Central: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover p: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
         MainActor.assumeIsolated {
-            if let t = ignored[p.identifier], Date().timeIntervalSince(t) < 900 { return }
+            if isIgnored(p.identifier) { return }
             if let cur = peripheral {
                 // Keep a live or in-progress link to this same phone. A pending connect to an old
                 // identifier is dropped: Android rotates its address, so the scan result wins.

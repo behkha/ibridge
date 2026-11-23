@@ -133,7 +133,7 @@ struct CodeCard: View {
                     .font(.app(32, .bold)).tracking(3).monospacedDigit()
                     .foregroundStyle(Palette.ink)
                     .environment(\.layoutDirection, .leftToRight)
-                    .frame(maxWidth: .infinity, alignment: Font.isPersian ? .trailing : .leading)
+                    .frame(maxWidth: .infinity, alignment: .leading) // leading = right edge in Persian
             }
             Button {
                 UIPasteboard.general.setItems([[UIPasteboard.typeAutomatic: code.code]],

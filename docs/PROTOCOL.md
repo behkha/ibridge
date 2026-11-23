@@ -18,7 +18,7 @@ Byte order is big-endian. `||` is concatenation. Public keys are P-256 in uncomp
 
 - **Advertising**: A advertises the 128-bit service UUID, connectable, no name, `ADVERTISE_MODE_LOW_POWER` while linked or idle and `LOW_LATENCY` while the pairing sheet is open. iOS background scans must filter on this UUID.
 - **Identity** is proven by the handshake, not by the address: Android rotates its address. I caches the peripheral identifier of the last good link and calls `connect` on it (pending connects never time out on iOS). If a handshake with some peripheral fails with `NOT_PAIRED`, I ignores that identifier for 15 minutes.
-- **One link at a time**: A serves one paired iPhone. A second central that connects gets `ERROR BUSY` and is disconnected.
+- **One link at a time**: A's GATT server sees every LE link the phone has (watches, earbuds), so a central takes A's single iBridge slot only when it subscribes to `TX` or writes `RX`. Another central that does either while the slot is taken is disconnected. A central with no live session 20 s after taking the slot is disconnected. A keeps advertising until a session is live.
 - **MTU**: I lets iOS negotiate (typically 185 to 517). A records `onMtuChanged`. Chunk size = `MTU − 3`; default MTU 23 gives 20-byte chunks.
 
 ## 2. Framing
@@ -54,7 +54,7 @@ Packet = `type(1) || body`.
 | `0x20` | `DATA` | both | `counter(8) || ciphertext || tag(16)` |
 | `0x7F` | `ERROR` | both | `code(1) || reason(utf-8)` |
 
-Error codes: `1 NOT_PAIRED`, `2 PAIRING_CLOSED`, `3 BAD_PROOF`, `4 TOO_MANY_ATTEMPTS`, `5 BUSY`, `6 BAD_PACKET`, `7 VERSION`. The sender disconnects after an `ERROR`.
+Error codes: `1 NOT_PAIRED`, `2 PAIRING_CLOSED`, `3 BAD_PROOF`, `4 TOO_MANY_ATTEMPTS`, `5 BUSY` (reserved), `6 BAD_PACKET`, `7 VERSION`. The sender disconnects after an `ERROR`.
 
 ## 3. Keys
 
@@ -98,15 +98,17 @@ A stranger cannot compute the proof without the 128-bit token, and cannot test g
 
 ### 4.3 Typed-code path (`mode = 0x02`)
 
-A 30-bit code is too short to key an HMAC that an active attacker could brute-force offline, so the code is checked in **5 rounds of 6 bits**, each committed before it is revealed (the same construction as Bluetooth passkey entry). An attacker in the middle must guess each round's bits before seeing them: success chance 2⁻²⁴ per attempt at best, and every failure replaces the code.
+A 30-bit code is too short to key an HMAC that an active attacker could brute-force offline, so the code is checked in **5 rounds of 6 bits**, each committed before it is revealed (like Bluetooth passkey entry). In each round A, which owns the code, reveals before I:
+- A fake Android must reveal bits it does not know before I reveals anything, so a failed try teaches it nothing.
+- A fake iPhone can learn one round's bits from A's reveal, but must already have committed to them; its wrong reveal, or hanging up before revealing, counts as a failed attempt on A, and **every failed or abandoned attempt replaces the code**. Success chance per attempt: 2⁻³⁰.
 
 1. I → `PAIR_HELLO_REQ`. A → `PAIR_HELLO(A_pub, name)`.
 2. I → `PAIR_REQUEST(0x02, I_pub, Ei_pub, name)`.
 3. For `r = 0 … 4`, with `b_r` = bits `6r … 6r+5` of the code (first character = most significant). `r` and `b_r` enter the HMAC as one byte each:
    - I picks `Ni_r` (16 random bytes) → `PASS_COMMIT(r, HMAC(Ni_r, "ibridge-pass-v1" || "I" || A_pub || I_pub || Ei_pub || r || b_r))`
-   - A picks `Na_r` → `PASS_COMMIT(r, HMAC(Na_r, "ibridge-pass-v1" || "A" || A_pub || I_pub || Ei_pub || r || b_r))`
-   - I → `PASS_REVEAL(r, Ni_r)`. A recomputes I's commit with its own `b_r`; mismatch → `BAD_PROOF`.
-   - A → `PASS_REVEAL(r, Na_r)`. I recomputes; mismatch → abort and show "code didn't match".
+   - A picks `Na_r` → `PASS_COMMIT(r, HMAC(Na_r, "ibridge-pass-v1" || "A" || A_pub || I_pub || Ei_pub || r || b_r))`, then at once `PASS_REVEAL(r, Na_r)`.
+   - I recomputes A's commit with its own `b_r`; mismatch → I aborts without revealing and shows "code didn't match".
+   - I → `PASS_REVEAL(r, Ni_r)`. A recomputes I's commit; mismatch → `BAD_PROOF`, code replaced.
 4. `k_pair = HKDF(ikm = ECDH(Ei, A), salt = SHA-256(Ni_0 || Na_0 || … || Ni_4 || Na_4), info = "ibridge-pair-v1" || A_pub || I_pub || Ei_pub, L = 32)`.
 5. `PAIR_PROOF` and `PAIR_ACCEPT` as in 4.2.
 
@@ -128,7 +130,7 @@ Every connection starts here (after pairing, on the same connection).
    k_ia = okm[0..32]   (I → A)
    k_ai = okm[32..64]  (A → I)
    ```
-4. I sends `hello` (section 6) as its first `DATA`. A accepts no other message first and sends nothing encrypted until that `hello` decrypts; this confirms both keys. No `hello` within 10 s → A disconnects.
+4. I sends `hello` (section 6) as its first `DATA`. A accepts no other message first and sends nothing encrypted until that `hello` decrypts. A answers with `status`; I treats the link as live only once that first record from A decrypts. Together this confirms both keys.
 
 ### 5.1 Records
 
@@ -163,12 +165,12 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 |---|---|---|
 | `status` | `battery` 0–100, `charging`, `sims`: [{`sim`, `carrier`, `signal` 0–4}], `perms`: {`sms`, `calls`, `contacts`, `notifications`, `battery`}, `name` | after `hello`, then on any change, at most every 30 s |
 | `page` | `kind`, `items`, `cursor`, `more` | answer to `sync` |
-| `sms` | `id`, `thread`, `addr`, `name`?, `body`, `ts`, `dir`: `in` \| `out`, `read`, `sim`, `state`: `ok` \| `pending` \| `failed` | each text received or sent on A |
+| `sms` | `id`, `thread`, `addr`, `name`?, `body`, `ts`, `dir`: `in` \| `out`, `read`, `sim`, `state`: `ok` \| `pending` \| `failed`, `code`? (one-time code found in an incoming text) | each text received or sent on A, and again when a `pending` text becomes `ok` or `failed` |
 | `otp` | `sms` (its `id`), `code`, `from`, `ts` | right after an `sms` with a one-time code |
 | `call` | `id`, `addr`, `name`?, `kind`: `in` \| `out` \| `missed` \| `rejected`, `ts`, `dur` (s), `sim` | each new call-log row |
 | `call.ring` | `call` (event id), `addr`, `name`?, `sim`, `ts` | an incoming call starts ringing |
 | `call.end` | `call`, `how`: `answered` \| `missed` \| `declined` \| `ended` | that call stops ringing |
-| `sent` | `req`, `ok`, `sms`? (id of the stored text), `err`? | after a `send` finishes or fails |
+| `sent` | `req`, `ok`, `err`? | after a `send` finishes or fails |
 | `pong` | `ts` | answer to `ping` |
 | `unpair` | — | A was unlinked; I forgets `A_pub` |
 
@@ -183,6 +185,7 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 - The cursor is opaque to I. `null` means "from the start": texts and calls from the last **30 days**, contacts from the first one.
 - A returns items oldest first (texts, calls) and sets `more` while items remain. I asks again with the returned cursor.
 - On every `hello` I re-syncs `sms` and `calls` from its stored cursors, so a text received while the link was down still arrives. Live `sms`/`call` messages and page items share ids, so I de-duplicates by `id`.
+- A cursor is `"<last id>|<since ts>"`. I moves it past each live item's numeric `id` while no paged sync of that kind is running, so a reconnect only fetches what it missed.
 - Contacts are re-synced from `null` when the user pulls to refresh or `status.perms.contacts` turns true.
 
 ### One-time codes

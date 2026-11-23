@@ -11,6 +11,10 @@ struct MemoryKey: StaticKey {
 func log(_ s: String) { FileHandle.standardError.write(("IOS " + s + "\n").data(using: .utf8)!) }
 
 let args = CommandLine.arguments
+if args[1] == "parse" {
+    guard case .qr(let key, let token, let name)? = PairingStart.parse(args[2]) else { log("ERROR unparseable"); exit(2) }
+    log("parsed key \(key.count) bytes, token \(token.count) bytes, name \(name)"); exit(0)
+}
 let start: PairingStart = args[1] == "qr" ? PairingStart.parse(args[2])! : .code(args[2])
 let h = Handshake(identity: MemoryKey(), myName: "iPhone 15")
 var framer = Framer()

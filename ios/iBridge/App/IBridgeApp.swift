@@ -60,15 +60,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
         let info = response.notification.request.content.userInfo
         guard let call = info["call"] as? String else { return }
-        let from = response.notification.request.content.title
+        let addr = info["addr"] as? String ?? ""
         await MainActor.run {
             switch response.actionIdentifier {
             case "decline":
                 Self.central?.declineCall(call)
             case "reply":
-                if let text = (response as? UNTextInputNotificationResponse)?.userText, !text.isEmpty {
+                if let text = (response as? UNTextInputNotificationResponse)?.userText, !text.isEmpty, !addr.isEmpty {
                     Self.central?.declineCall(call)
-                    _ = Self.central?.sendText(to: from, body: text)
+                    _ = Self.central?.sendText(to: addr, body: text)
                 }
             default: break
             }

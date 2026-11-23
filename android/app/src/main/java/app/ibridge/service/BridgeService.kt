@@ -49,6 +49,7 @@ class BridgeService : Service() {
 
     /** Highest `_id` already pushed live, so the observers only send new rows. */
     private var lastSmsId = 0L
+    private val pendingSms = mutableSetOf<Long>()
     private var lastCallId = 0L
     private var lastStatusAt = 0L
 
@@ -68,7 +69,7 @@ class BridgeService : Service() {
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
         })
-        scope.launch { calls.collect { gatt.worker.execute { onCallEvent(it) } } }
+        scope.launch { calls.collect { gatt.post { onCallEvent(it) } } }
         scope.launch { Pairing.window.collect { gatt.setFastAdvertising(it != null) } }
         Link.setSignal(phone.signalLevel())
     }
@@ -76,7 +77,7 @@ class BridgeService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         gatt.start()
         registerObservers() // permissions may have been granted since onCreate
-        if (intent?.action == ACTION_UNLINK) gatt.worker.execute {
+        if (intent?.action == ACTION_UNLINK) gatt.post {
             push(JSONObject().put("t", "unpair"))
             Link.setPeer(null)
             gatt.stop(); gatt.start()
@@ -115,13 +116,13 @@ class BridgeService : Service() {
         override fun save(peer: app.ibridge.core.Peer) = Link.setPeer(peer)
     }
 
-    private fun engineFor(send: (ByteArray) -> Unit) = LinkEngine(
-        deviceName = Build.MODEL,
+    private fun engineFor(send: (ByteArray) -> Unit, linkLive: () -> Unit) = LinkEngine(
+        deviceName = deviceName(this),
         identity = app.ibridge.core.Identity,
         peers = peerStore,
         log = { Log.i(TAG, it) },
         send = send,
-        onLive = { Link.setConnected(true) },
+        onLive = { Link.setConnected(true); linkLive() },
         onMessage = ::onMessage,
     )
 
@@ -153,7 +154,7 @@ class BridgeService : Service() {
     private fun sendStatus(force: Boolean = false) {
         val now = System.currentTimeMillis()
         if (!force && now - lastStatusAt < 30_000) return
-        if (push(phone.status(Build.MODEL, perms()))) lastStatusAt = now
+        if (push(phone.status(deviceName(this), perms()))) lastStatusAt = now
         Link.setSignal(phone.signalLevel())
     }
 
@@ -197,7 +198,7 @@ class BridgeService : Service() {
                 ok = ok && resultCode == android.app.Activity.RESULT_OK
                 if (--remaining > 0) return
                 unregisterReceiver(this)
-                gatt.worker.execute {
+                gatt.post {
                     push(JSONObject().put("t", "sent").put("req", req).put("ok", ok).apply { if (!ok) put("err", "carrier refused") })
                 }
             }
@@ -210,32 +211,41 @@ class BridgeService : Service() {
         if (!phone.has(Manifest.permission.ANSWER_PHONE_CALLS)) return
         @Suppress("DEPRECATION")
         val ended = getSystemService(TelecomManager::class.java).endCall()
-        if (ended) push(JSONObject().put("t", "call.end").put("call", callId).put("how", "declined"))
+        if (ended) {
+            push(JSONObject().put("t", "call.end").put("call", callId).put("how", "declined"))
+            if (ringing?.first == callId) ringing = null // the IDLE broadcast that follows is not a missed call
+        }
     }
 
     // ---- live events ----
 
     private val smsObserver = object : ContentObserver(observerHandler) {
-        override fun onChange(selfChange: Boolean) = gatt.worker.execute {
+        override fun onChange(selfChange: Boolean) = gatt.post {
+            // Texts whose sending was still pending: push again once their state settles.
+            phone.smsByIds(pendingSms).forEach { item ->
+                if (item.getString("state") == "pending") return@forEach
+                pendingSms.remove(item.getString("id").toLong())
+                push(JSONObject(item.toString()).put("t", "sms"))
+            }
             val rows = phone.smsAfter(lastSmsId, 0, 50)
             rows.forEach { item ->
-                lastSmsId = maxOf(lastSmsId, item.getString("id").toLong())
+                val id = item.getString("id").toLong()
+                lastSmsId = maxOf(lastSmsId, id)
+                if (item.getString("state") == "pending") pendingSms += id
                 if (!push(JSONObject(item.toString()).put("t", "sms"))) return@forEach
                 Link.countSent(text = true)
-                if (item.getString("dir") == "in") {
-                    Phone.findCode(item.getString("body"))?.let { code ->
-                        push(
-                            JSONObject().put("t", "otp").put("sms", item.getString("id")).put("code", code)
-                                .put("from", item.optString("name", item.getString("addr"))).put("ts", item.getLong("ts"))
-                        )
-                    }
+                item.optString("code").takeIf { it.isNotEmpty() }?.let { code ->
+                    push(
+                        JSONObject().put("t", "otp").put("sms", item.getString("id")).put("code", code)
+                            .put("from", item.optString("name", item.getString("addr"))).put("ts", item.getLong("ts"))
+                    )
                 }
             }
         }
     }
 
     private val callObserver = object : ContentObserver(observerHandler) {
-        override fun onChange(selfChange: Boolean) = gatt.worker.execute {
+        override fun onChange(selfChange: Boolean) = gatt.post {
             phone.callsAfter(lastCallId, 0, 50).forEach { item ->
                 lastCallId = maxOf(lastCallId, item.getString("id").toLong())
                 if (push(JSONObject(item.toString()).put("t", "call"))) Link.countSent(call = true)
@@ -247,7 +257,7 @@ class BridgeService : Service() {
     private var callsWatched = false
 
     /** Idempotent. Starts from the newest row so only texts and calls after this moment go out live. */
-    private fun registerObservers() = gatt.worker.execute {
+    private fun registerObservers() = gatt.post {
         if (!smsWatched && phone.has(Manifest.permission.READ_SMS)) {
             lastSmsId = phone.latestSmsId()
             contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, smsObserver)
@@ -272,7 +282,8 @@ class BridgeService : Service() {
                 ringing = id to number
                 push(
                     JSONObject().put("t", "call.ring").put("call", id).put("addr", number)
-                        .putOpt("name", phone.nameFor(number)).put("sim", 1).put("ts", System.currentTimeMillis())
+                        .putOpt("name", phone.nameFor(number)).put("sim", e.subId?.let { phone.slotForSubscription(it) } ?: 1)
+                        .put("ts", System.currentTimeMillis())
                 )
             }
             "OFFHOOK" -> ringing?.let { (id, _) -> push(JSONObject().put("t", "call.end").put("call", id).put("how", "answered")); ringing = null }
@@ -287,17 +298,21 @@ class BridgeService : Service() {
                     BluetoothAdapter.STATE_ON -> gatt.start()
                     BluetoothAdapter.STATE_TURNING_OFF -> { gatt.stop(); Link.setConnected(false) }
                 }
-                else -> gatt.worker.execute { sendStatus() }
+                else -> gatt.post { sendStatus() }
             }
         }
     }
 
-    data class CallEvent(val state: String, val number: String?)
+    data class CallEvent(val state: String, val number: String?, val subId: Int? = null)
 
     companion object {
         const val TAG = "iBridge"
         const val CHANNEL = "link"
         const val ACTION_UNLINK = "app.ibridge.UNLINK"
+
+        /** The name the user sees in Settings ("Galaxy S21 Ultra"), not the model code ("SM-G998B"). */
+        fun deviceName(context: Context): String =
+            android.provider.Settings.Global.getString(context.contentResolver, "device_name")?.takeIf { it.isNotBlank() } ?: Build.MODEL
         val calls = MutableSharedFlow<CallEvent>(extraBufferCapacity = 8)
 
         fun canStart(context: Context) =

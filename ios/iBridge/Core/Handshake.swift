@@ -72,6 +72,7 @@ final class Handshake {
     }
 
     private var step: Step = .idle
+    private var confirmed = false
     private let identity: StaticKey
     private let myName: String
     private var iPub: Data { identity.publicKey.x963Representation }
@@ -81,6 +82,7 @@ final class Handshake {
         self.myName = myName
     }
 
+    /// Records can be sealed once keys exist; `.live` is reported only after Android's first record decrypts.
     var isLive: Bool { if case .live = step { return true } else { return false } }
 
     // MARK: start
@@ -138,25 +140,28 @@ final class Handshake {
             let eiPub = s.ei.publicKey.x963Representation
             return [.send(Data([Proto.pairRequest, Proto.modeCode]) + iPub + eiPub + Data(myName.utf8)), commitRound(s)]
 
+        // Round r: I commits, A commits and reveals, then I reveals (PROTOCOL.md 4.3). The iPhone checks
+        // Android's bits before it reveals anything, so a fake Android learns nothing from a failed try.
         case (Proto.passCommit, .codeRounds(let s)):
             guard body.count == 33, Int(body[body.startIndex]) == s.round, s.theirCommit == nil else { throw LinkError.badPacket("bad PASS_COMMIT") }
             s.theirCommit = Data(body.dropFirst())
-            return [.send(Data([Proto.passReveal, UInt8(s.round)]) + s.myNonce)]
+            return []
 
         case (Proto.passReveal, .codeRounds(let s)):
             guard body.count == 17, Int(body[body.startIndex]) == s.round, let theirs = s.theirCommit else { throw LinkError.badPacket("bad PASS_REVEAL") }
             let na = Data(body.dropFirst())
             guard Crypto.equal(theirs, commit(nonce: na, side: "A", s: s, round: s.round)) else { throw LinkError.codeMismatch }
+            let reveal = Event.send(Data([Proto.passReveal, UInt8(s.round)]) + s.myNonce)
             s.transcript += [s.myNonce, na]
             s.theirCommit = nil
             s.round += 1
-            if s.round < Proto.codeRounds { return [commitRound(s)] }
+            if s.round < Proto.codeRounds { return [reveal, commitRound(s)] }
             let a = try P256.KeyAgreement.PublicKey(x963Representation: s.aPub)
             let kPair = Crypto.hkdf(ikm: Crypto.raw(try s.ei.sharedSecretFromKeyAgreement(with: a)),
                                     salt: Crypto.sha256(s.transcript.reduce(Data(), +)),
                                     info: pairInfo(aPub: s.aPub, eiPub: s.ei.publicKey.x963Representation), length: 32)
             step = .awaitAccept(peer: PairedPeer(publicKey: s.aPub, name: s.name), kPair: kPair)
-            return [.send(Data([Proto.pairProof]) + Crypto.hmac(kPair, Data(ascii: "I")))]
+            return [reveal, .send(Data([Proto.pairProof]) + Crypto.hmac(kPair, Data(ascii: "I")))]
 
         case (Proto.pairAccept, .awaitAccept(var peer, let kPair)):
             guard body.count >= 32, Crypto.equal(Data(body.prefix(32)), Crypto.hmac(kPair, Data(ascii: "A"))) else { throw LinkError.badProof }
@@ -179,13 +184,17 @@ final class Handshake {
             let hello: [String: Any] = ["t": "hello", "app": "ios", "ver": 1, "lang": Locale.current.language.languageCode?.identifier ?? "en"]
             let first = try cipher.seal(try JSONSerialization.data(withJSONObject: hello))
             step = .live(cipher)
-            return [.send(first), .live]
+            confirmed = false
+            return [.send(first)]
 
         case (Proto.data, .live(var c)):
             let plain = try c.open(p)
             step = .live(c)
-            guard let obj = try JSONSerialization.jsonObject(with: plain) as? [String: Any] else { return [] }
-            return [.message(obj)]
+            // Android's first record proves it derived the same keys; only then is the link live.
+            let live: [Event] = confirmed ? [] : [.live]
+            confirmed = true
+            guard let obj = try JSONSerialization.jsonObject(with: plain) as? [String: Any] else { return live }
+            return live + [.message(obj)]
 
         default:
             throw LinkError.badPacket("unexpected packet \(type)")

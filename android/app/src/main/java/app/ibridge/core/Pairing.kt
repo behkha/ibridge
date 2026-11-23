@@ -28,15 +28,20 @@ object Pairing {
     private val _window = MutableStateFlow<PairingWindow?>(null)
     val window: StateFlow<PairingWindow?> = _window.asStateFlow()
 
+    /** True after too many wrong codes, until the user reopens the pairing sheet. */
+    @Volatile var locked = false
+        private set
+
     /** Opens a window, or renews it when the current one has expired. */
     fun open() {
+        locked = false
         val w = _window.value
         if (w == null || w.expiresAt <= System.currentTimeMillis()) {
             _window.value = PairingWindow(randomBytes(16), PairingWindow.newCode(), System.currentTimeMillis() + PairingWindow.LIFETIME_MS)
         }
     }
 
-    fun close() { _window.value = null }
+    fun close() { _window.value = null; locked = false }
 
     /** The live window, or null when pairing is closed. */
     fun current(): PairingWindow? = _window.value?.takeIf { it.expiresAt > System.currentTimeMillis() }
@@ -46,7 +51,7 @@ object Pairing {
         _window.update { w ->
             w ?: return@update null
             val n = w.failures + 1
-            if (n >= PairingWindow.MAX_FAILURES) null else w.copy(code = PairingWindow.newCode(), failures = n)
+            if (n >= PairingWindow.MAX_FAILURES) { locked = true; null } else w.copy(code = PairingWindow.newCode(), failures = n)
         }
     }
 }

@@ -18,6 +18,8 @@ enum Demo {
         let cal = Calendar.current
         func today(_ h: Int, _ m: Int) -> Date { cal.date(bySettingHour: h, minute: m, second: 0, of: Date())! }
         func daysAgo(_ d: Int, _ h: Int, _ m: Int) -> Date { cal.date(byAdding: .day, value: -d, to: today(h, m))! }
+        // The mockup's last call is on "Saturday": the latest Saturday 2 to 6 days back, when there is one.
+        let saturday = (2...6).first { cal.component(.weekday, from: daysAgo($0, 10, 0)) == 7 } ?? 4
 
         let texts: [(String, String, Date, String, Int)] = fa ? [
             ("سارا احمدی", "+989121110001", today(14, 8), "دم ساختمونم، درِ آبی کنار داروخانه", 2),
@@ -49,7 +51,7 @@ enum Demo {
             ("Mom", "missed", today(13, 55), 2), ("Sara Ahmadi", "in", today(12, 30), 2),
             ("+98 21 8820 4410", "missed", today(11, 2), 1), ("Reza Karimi", "out", today(10, 47), 2),
             ("Courier", "in", daysAgo(1, 18, 0), 1), ("Neda Jafari", "out", daysAgo(1, 15, 0), 2),
-            ("Dr. Moradi Clinic", "in", daysAgo(4, 10, 0), 1),
+            ("Dr. Moradi Clinic", "in", daysAgo(saturday, 10, 0), 1),
         ]
         var c = 0
         for (name, kind, ts, sim) in calls {

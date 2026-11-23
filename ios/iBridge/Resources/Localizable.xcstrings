@@ -520,6 +520,46 @@
           }
         }
       }
+    },
+    "Your Android phone unlinked this iPhone. Pair again.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "گوشی اندروید شما اتصال این آیفون را قطع کرد. دوباره جفت کنید."
+          }
+        }
+      }
+    },
+    "Can’t find your Android phone. Keep its pairing code open and nearby.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "گوشی اندروید پیدا نشد. کد جفت کردن را باز و گوشی را نزدیک نگه دارید."
+          }
+        }
+      }
+    },
+    "Your text wasn’t sent. Check the Android phone’s signal and try again.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "پیام ارسال نشد. آنتن گوشی اندروید را بررسی و دوباره امتحان کنید."
+          }
+        }
+      }
+    },
+    "OK": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "باشه"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

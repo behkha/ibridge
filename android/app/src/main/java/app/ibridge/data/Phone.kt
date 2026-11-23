@@ -2,6 +2,7 @@ package app.ibridge.data
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -9,6 +10,7 @@ import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.BatteryManager
+import android.os.Bundle
 import android.os.PowerManager
 import android.provider.CallLog
 import android.provider.ContactsContract
@@ -23,6 +25,18 @@ import java.util.concurrent.ConcurrentHashMap
 /** Reads the phone's texts, calls, contacts and status as PROTOCOL.md section 6 items. */
 class Phone(private val context: Context) {
     private val resolver = context.contentResolver
+
+    /**
+     * Query with a limit passed as Bundle args. The call log provider uses strict SQL grammar
+     * (Android 11+) and throws on "LIMIT" inside the sort order.
+     */
+    private fun query(uri: Uri, cols: Array<String>, where: String?, args: Array<String>?, order: String, limit: Int): Cursor? =
+        resolver.query(uri, cols, Bundle().apply {
+            if (where != null) putString(ContentResolver.QUERY_ARG_SQL_SELECTION, where)
+            if (args != null) putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, args)
+            putString(ContentResolver.QUERY_ARG_SQL_SORT_ORDER, order)
+            putInt(ContentResolver.QUERY_ARG_LIMIT, limit)
+        }, null)
 
     fun has(permission: String) = context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 
@@ -53,6 +67,8 @@ class Phone(private val context: Context) {
 
     private fun slotForSub(subId: Int): Int = subscriptions().firstOrNull { it.subscriptionId == subId }?.simSlotIndex?.plus(1) ?: 1
 
+    fun slotForSubscription(subId: Int): Int = slotForSub(subId)
+
     fun subForSlot(slot: Int?): Int? = subscriptions().firstOrNull { it.simSlotIndex + 1 == slot }?.subscriptionId
 
     // ---- texts ----
@@ -65,12 +81,14 @@ class Phone(private val context: Context) {
     private fun smsItem(c: Cursor): JSONObject {
         val addr = c.getString(2).orEmpty()
         val type = c.getInt(5)
+        val body = c.getString(3).orEmpty()
         return JSONObject()
             .put("id", c.getLong(0).toString())
             .put("thread", c.getLong(1).toString())
             .put("addr", addr)
             .putOpt("name", nameFor(addr))
-            .put("body", c.getString(3).orEmpty())
+            .put("body", body)
+            .putOpt("code", if (type == Telephony.Sms.MESSAGE_TYPE_INBOX) findCode(body) else null)
             .put("ts", c.getLong(4))
             .put("dir", if (type == Telephony.Sms.MESSAGE_TYPE_INBOX) "in" else "out")
             .put("read", c.getInt(6) == 1)
@@ -85,11 +103,20 @@ class Phone(private val context: Context) {
     /** Texts with `_id` above [afterId], oldest first. */
     fun smsAfter(afterId: Long, sinceTs: Long, limit: Int): List<JSONObject> {
         if (!has(Manifest.permission.READ_SMS)) return emptyList()
-        return resolver.query(
+        return query(
             Telephony.Sms.CONTENT_URI, smsCols,
             "${Telephony.Sms._ID} > ? AND ${Telephony.Sms.DATE} >= ? AND ${Telephony.Sms.TYPE} != ${Telephony.Sms.MESSAGE_TYPE_DRAFT}",
             arrayOf(afterId.toString(), sinceTs.toString()),
-            "${Telephony.Sms._ID} ASC LIMIT $limit",
+            "${Telephony.Sms._ID} ASC", limit,
+        )?.use { c -> buildList { while (c.moveToNext()) add(smsItem(c)) } }.orEmpty()
+    }
+
+    /** Re-reads specific texts, to follow a sent text from pending to sent or failed. */
+    fun smsByIds(ids: Collection<Long>): List<JSONObject> {
+        if (ids.isEmpty() || !has(Manifest.permission.READ_SMS)) return emptyList()
+        return query(
+            Telephony.Sms.CONTENT_URI, smsCols, "${Telephony.Sms._ID} IN (${ids.joinToString(",")})", null,
+            "${Telephony.Sms._ID} ASC", ids.size,
         )?.use { c -> buildList { while (c.moveToNext()) add(smsItem(c)) } }.orEmpty()
     }
 
@@ -125,11 +152,11 @@ class Phone(private val context: Context) {
 
     fun callsAfter(afterId: Long, sinceTs: Long, limit: Int): List<JSONObject> {
         if (!has(Manifest.permission.READ_CALL_LOG)) return emptyList()
-        return resolver.query(
+        return query(
             CallLog.Calls.CONTENT_URI, callCols,
             "${CallLog.Calls._ID} > ? AND ${CallLog.Calls.DATE} >= ?",
             arrayOf(afterId.toString(), sinceTs.toString()),
-            "${CallLog.Calls._ID} ASC LIMIT $limit",
+            "${CallLog.Calls._ID} ASC", limit,
         )?.use { c -> buildList { while (c.moveToNext()) add(callItem(c)) } }.orEmpty()
     }
 
@@ -190,7 +217,7 @@ class Phone(private val context: Context) {
 
     private fun maxId(uri: Uri, col: String, perm: String): Long {
         if (!has(perm)) return 0
-        return resolver.query(uri, arrayOf(col), null, null, "$col DESC LIMIT 1")?.use {
+        return query(uri, arrayOf(col), null, null, "$col DESC", 1)?.use {
             if (it.moveToFirst()) it.getLong(0) else 0
         } ?: 0
     }

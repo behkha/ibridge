@@ -25,6 +25,7 @@ class CallReceiver : BroadcastReceiver() {
             TelephonyManager.EXTRA_STATE_OFFHOOK -> "OFFHOOK"
             else -> "IDLE"
         }
-        BridgeService.calls.tryEmit(BridgeService.CallEvent(s, number))
+        val sub = intent.getIntExtra(android.telephony.SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX, -1).takeIf { it >= 0 }
+        BridgeService.calls.tryEmit(BridgeService.CallEvent(s, number, sub))
     }
 }

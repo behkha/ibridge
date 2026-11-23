@@ -150,7 +150,7 @@ class MainActivity : ComponentActivity() {
         if (sheetOpen) {
             PairingSheet(
                 window = window,
-                deviceName = Build.MODEL,
+                deviceName = BridgeService.deviceName(this@MainActivity),
                 onRenew = { Pairing.open() },
                 onDismiss = { sheetOpen = false; Pairing.close() },
             )

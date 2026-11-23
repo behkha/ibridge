@@ -45,7 +45,7 @@ class LinkEngine(
         val body = p.copyOfRange(1, p.size)
         when (p[0]) {
             Proto.PAIR_HELLO_REQ -> {
-                Pairing.current() ?: throw ProtocolException(ErrorCode.PAIRING_CLOSED, "pairing closed")
+                openWindow()
                 send(byteArrayOf(Proto.PAIR_HELLO) + identity.encoded + deviceName.toByteArray())
             }
             Proto.PAIR_REQUEST -> pairRequest(body)
@@ -59,6 +59,18 @@ class LinkEngine(
         }
     }
 
+    /**
+     * Call when the connection ends. A typed-code attempt that ends unfinished after Android revealed
+     * a round counts as a failure and replaces the code: otherwise a fake iPhone could learn one round
+     * per connection by hanging up.
+     */
+    fun close() {
+        val s = step
+        val exposed = (s is CodeRounds && (s.round > 0 || s.myNonce != null)) || (s is AwaitProof && s.viaCode)
+        step = Idle
+        if (exposed) Pairing.codeFailed()
+    }
+
     /** Encrypts and sends one JSON message. False when no live session exists. */
     fun sendMessage(msg: JSONObject): Boolean {
         val live = step as? Live ?: return false
@@ -68,10 +80,14 @@ class LinkEngine(
 
     // ---- pairing ----
 
+    private fun openWindow(): PairingWindow = Pairing.current()
+        ?: if (Pairing.locked) throw ProtocolException(ErrorCode.TOO_MANY_ATTEMPTS, "too many wrong codes")
+        else throw ProtocolException(ErrorCode.PAIRING_CLOSED, "pairing closed")
+
     private fun pairInfo(iPub: ByteArray, eiRaw: ByteArray) = ascii("ibridge-pair-v1") + identity.encoded + iPub + eiRaw
 
     private fun pairRequest(b: ByteArray) {
-        val w = Pairing.current() ?: throw ProtocolException(ErrorCode.PAIRING_CLOSED, "pairing closed")
+        val w = openWindow()
         if (b.size < 1 + 65 + 65) throw ProtocolException(ErrorCode.BAD_PACKET, "short PAIR_REQUEST")
         val mode = b[0]
         val iPub = b.copyOfRange(1, 66)
@@ -93,6 +109,11 @@ class LinkEngine(
         byteArrayOf(r.toByte(), roundBits(s.bits, r).toByte()),
     )
 
+    /**
+     * Round r: I commits, A commits and reveals at once, then I reveals (PROTOCOL.md 4.3).
+     * A, which owns the code, reveals first, so a fake Android never sees I's nonce before proving the bits;
+     * a fake iPhone that learns a round's bits from A's reveal still fails its own reveal, which replaces the code.
+     */
     private fun passCommit(b: ByteArray) {
         val s = step as? CodeRounds ?: throw ProtocolException(ErrorCode.BAD_PACKET, "unexpected PASS_COMMIT")
         if (b.size != 33 || b[0].toInt() != s.round || s.theirCommit != null) throw ProtocolException(ErrorCode.BAD_PACKET, "bad PASS_COMMIT")
@@ -100,6 +121,7 @@ class LinkEngine(
         val n = randomBytes(16)
         s.myNonce = n
         send(byteArrayOf(Proto.PASS_COMMIT, s.round.toByte()) + commit(n, "A", s, s.round))
+        send(byteArrayOf(Proto.PASS_REVEAL, s.round.toByte()) + n)
     }
 
     private fun passReveal(b: ByteArray) {
@@ -109,10 +131,10 @@ class LinkEngine(
         if (b.size != 17 || b[0].toInt() != s.round || theirs == null || mine == null) throw ProtocolException(ErrorCode.BAD_PACKET, "bad PASS_REVEAL")
         val ni = b.copyOfRange(1, 17)
         if (!constantTimeEquals(theirs, commit(ni, "I", s, s.round))) {
+            step = Idle
             Pairing.codeFailed()
             throw ProtocolException(ErrorCode.BAD_PROOF, "code mismatch")
         }
-        send(byteArrayOf(Proto.PASS_REVEAL, s.round.toByte()) + mine)
         s.transcript += ni
         s.transcript += mine
         s.theirCommit = null
@@ -127,6 +149,7 @@ class LinkEngine(
     private fun pairProof(b: ByteArray) {
         val s = step as? AwaitProof ?: throw ProtocolException(ErrorCode.BAD_PACKET, "unexpected PAIR_PROOF")
         if (b.size != 32 || !constantTimeEquals(b, hmac(s.kPair, ascii("I")))) {
+            step = Idle
             if (s.viaCode) Pairing.codeFailed()
             throw ProtocolException(ErrorCode.BAD_PROOF, "bad proof")
         }

@@ -25,18 +25,33 @@ import app.ibridge.core.Proto
 import app.ibridge.core.ProtocolException
 import java.util.ArrayDeque
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 /**
- * GATT peripheral (PROTOCOL.md sections 1-2). All protocol work runs on one thread, [worker],
+ * GATT peripheral (PROTOCOL.md sections 1-2). All protocol work runs on one thread through [post],
  * so the engine and the outbound queue never see concurrent calls.
+ *
+ * The GATT server sees every LE link the phone has (watches, earbuds). A central only takes the one
+ * iBridge slot when it subscribes to TX or writes RX, and loses it if no session is live 20 s later.
  */
 @SuppressLint("MissingPermission")
 class Gatt(
     private val context: Context,
-    private val newEngine: (send: (ByteArray) -> Unit) -> LinkEngine,
+    private val newEngine: (send: (ByteArray) -> Unit, onLive: () -> Unit) -> LinkEngine,
     private val onDisconnected: () -> Unit,
 ) {
-    val worker = Executors.newSingleThreadExecutor { Thread(it, "ibridge-gatt") }
+    private val worker = Executors.newSingleThreadScheduledExecutor { Thread(it, "ibridge-gatt") }
+
+    /** Runs [block] on the worker. A throw is logged and drops the link; it never kills the app. */
+    fun post(delayMs: Long = 0, block: () -> Unit) {
+        val safe = Runnable {
+            try { block() } catch (t: Throwable) {
+                Log.e(TAG, "worker task failed", t)
+                device?.let { drop(it) }
+            }
+        }
+        if (delayMs == 0L) worker.execute(safe) else worker.schedule(safe, delayMs, TimeUnit.MILLISECONDS)
+    }
 
     private val manager = context.getSystemService(BluetoothManager::class.java)
     private var server: BluetoothGattServer? = null
@@ -55,11 +70,11 @@ class Gatt(
     private var advertising = false
     private var lowLatency = false
 
-    fun start() = worker.execute {
-        if (server != null) return@execute
-        val adapter = manager.adapter ?: return@execute
-        if (!adapter.isEnabled) return@execute
-        val s = manager.openGattServer(context, callback) ?: return@execute
+    fun start() = post {
+        if (server != null) return@post
+        val adapter = manager.adapter ?: return@post
+        if (!adapter.isEnabled) return@post
+        val s = manager.openGattServer(context, callback) ?: return@post
         val service = BluetoothGattService(Proto.SERVICE, BluetoothGattService.SERVICE_TYPE_PRIMARY)
         val rx = BluetoothGattCharacteristic(
             Proto.RX,
@@ -75,7 +90,7 @@ class Gatt(
         advertise()
     }
 
-    fun stop() = worker.execute {
+    fun stop() = post {
         stopAdvertising()
         device?.let { server?.cancelConnection(it) }
         server?.close()
@@ -84,8 +99,8 @@ class Gatt(
     }
 
     /** Low latency while the pairing sheet is open, low power otherwise. */
-    fun setFastAdvertising(fast: Boolean) = worker.execute {
-        if (fast == lowLatency) return@execute
+    fun setFastAdvertising(fast: Boolean) = post {
+        if (fast == lowLatency) return@post
         lowLatency = fast
         if (advertising) { stopAdvertising(); advertise() }
     }
@@ -93,12 +108,12 @@ class Gatt(
     private val advertiseCallback = object : AdvertiseCallback() {
         override fun onStartFailure(errorCode: Int) {
             Log.w(TAG, "advertise failed $errorCode")
-            worker.execute { advertising = false }
+            post { advertising = false }
         }
     }
 
     private fun advertise() {
-        if (advertising || device != null || server == null) return
+        if (advertising || engine?.isLive == true || server == null) return
         val adv = manager.adapter?.bluetoothLeAdvertiser ?: return
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(if (lowLatency) AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY else AdvertiseSettings.ADVERTISE_MODE_LOW_POWER)
@@ -142,7 +157,19 @@ class Gatt(
         }
     }
 
+    /** Gives the slot to [d] if it is free. False when another central holds it. */
+    private fun claim(d: BluetoothDevice): Boolean {
+        if (device == d) return true
+        if (device != null) return false
+        device = d
+        engine = newEngine({ p -> sendPacket(p) }, { post { stopAdvertising() } })
+        Log.i(TAG, "central claimed the link")
+        post(delayMs = 20_000) { if (device == d && engine?.isLive != true) { Log.w(TAG, "no session in 20 s"); drop(d) } }
+        return true
+    }
+
     private fun resetConnection() {
+        engine?.close()
         device = null
         subscribed = false
         mtu = 23
@@ -164,22 +191,12 @@ class Gatt(
         Log.w(TAG, "protocol: ${e.error} ${e.message}")
         // Best effort: queue the ERROR, then drop once it has had a moment to go out.
         sendPacket(LinkEngine.error(e.error, e.message ?: ""))
-        worker.execute { Thread.sleep(150); if (device == d) drop(d) }
+        post(delayMs = 300) { if (device == d) drop(d) }
     }
 
     private val callback = object : BluetoothGattServerCallback() {
-        override fun onConnectionStateChange(d: BluetoothDevice, status: Int, newState: Int) = worker.execute {
-            if (newState == BluetoothProfile.STATE_CONNECTED) {
-                if (device != null && device != d) {
-                    // One iPhone at a time (PROTOCOL.md 1): refuse the second central.
-                    server?.cancelConnection(d)
-                    return@execute
-                }
-                device = d
-                stopAdvertising()
-                engine = newEngine { p -> sendPacket(p) }
-                Log.i(TAG, "central connected")
-            } else if (newState == BluetoothProfile.STATE_DISCONNECTED && d == device) {
+        override fun onConnectionStateChange(d: BluetoothDevice, status: Int, newState: Int) = post {
+            if (newState == BluetoothProfile.STATE_DISCONNECTED && d == device) {
                 Log.i(TAG, "central disconnected")
                 resetConnection()
                 onDisconnected()
@@ -187,22 +204,25 @@ class Gatt(
             }
         }
 
-        override fun onMtuChanged(d: BluetoothDevice, newMtu: Int) = worker.execute {
+        override fun onMtuChanged(d: BluetoothDevice, newMtu: Int) = post {
             if (d == device) mtu = newMtu
         }
 
         override fun onDescriptorWriteRequest(
             d: BluetoothDevice, requestId: Int, descriptor: BluetoothGattDescriptor,
             preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray?,
-        ) = worker.execute {
+        ) = post {
             if (responseNeeded) server?.sendResponse(d, requestId, BluetoothGatt.GATT_SUCCESS, 0, value)
-            if (d == device && descriptor.uuid == Proto.CCCD) {
-                subscribed = value != null && value.isNotEmpty() && (value[0].toInt() and 1) == 1
+            if (descriptor.uuid == Proto.CCCD && descriptor.characteristic.uuid == Proto.TX) {
+                val on = value != null && value.isNotEmpty() && (value[0].toInt() and 1) == 1
+                if (!on) { if (d == device) subscribed = false; return@post }
+                if (!claim(d)) { server?.cancelConnection(d); return@post } // one iPhone at a time
+                subscribed = true
                 pump()
             }
         }
 
-        override fun onDescriptorReadRequest(d: BluetoothDevice, requestId: Int, offset: Int, descriptor: BluetoothGattDescriptor) = worker.execute {
+        override fun onDescriptorReadRequest(d: BluetoothDevice, requestId: Int, offset: Int, descriptor: BluetoothGattDescriptor) = post {
             val v = if (subscribed && d == device) BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE else BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE
             server?.sendResponse(d, requestId, BluetoothGatt.GATT_SUCCESS, 0, v)
         }
@@ -210,13 +230,13 @@ class Gatt(
         override fun onCharacteristicWriteRequest(
             d: BluetoothDevice, requestId: Int, characteristic: BluetoothGattCharacteristic,
             preparedWrite: Boolean, responseNeeded: Boolean, offset: Int, value: ByteArray?,
-        ) = worker.execute {
-            if (preparedWrite || characteristic.uuid != Proto.RX || d != device) {
+        ) = post {
+            if (preparedWrite || characteristic.uuid != Proto.RX || !claim(d)) {
                 if (responseNeeded) server?.sendResponse(d, requestId, BluetoothGatt.GATT_REQUEST_NOT_SUPPORTED, 0, null)
-                return@execute
+                return@post
             }
             if (responseNeeded) server?.sendResponse(d, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
-            val e = engine ?: return@execute
+            val e = engine ?: return@post
             try {
                 deframer.feed(value ?: ByteArray(0))?.let { e.onPacket(it) }
             } catch (x: ProtocolException) {
@@ -226,7 +246,7 @@ class Gatt(
             }
         }
 
-        override fun onNotificationSent(d: BluetoothDevice, status: Int) = worker.execute {
+        override fun onNotificationSent(d: BluetoothDevice, status: Int) = post {
             inFlight = false
             if (status != BluetoothGatt.GATT_SUCCESS) Log.w(TAG, "notification status $status")
             pump()

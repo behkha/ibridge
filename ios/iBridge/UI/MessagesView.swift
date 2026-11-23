@@ -109,7 +109,7 @@ struct ConversationView: View {
                     .padding(.horizontal, 12).padding(.vertical, 8)
                     .background(Palette.field, in: RoundedRectangle(cornerRadius: 18))
                 Button {
-                    _ = central?.sendText(to: addr, body: draft)
+                    _ = central?.sendText(to: addr, body: draft, sim: items.last?.sim) // reply on the SIM the conversation uses
                     draft = ""
                 } label: {
                     Image(systemName: "arrow.up.circle.fill").font(.system(size: 32)).foregroundStyle(Palette.accent)
