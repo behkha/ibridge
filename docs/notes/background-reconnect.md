@@ -25,3 +25,9 @@ Goal: a locked iPhone (iBridge suspended) re-links by itself after Android's iBr
 
 ## How to run the test
 See .claude/skills/verify/SKILL.md section 2b. Restart Android via `am force-stop` + `am start -n app.ibridge.android/app.ibridge.MainActivity` then HOME (the service is not exported, so `start-foreground-service` fails). Lock the iPhone at least 1 minute first. Wait for `← hello` in `adb logcat -s iBridge`.
+
+## Tests 2026-11-24 01:30 (Android-side evidence; iPhone was not on USB)
+- **Out of range works.** Android Bluetooth off 8 s, then on: the suspended iPhone relinked ~1 s after BT came back (`← hello` 01:34:26.96). The ACL drop wakes the app and its pending connect to the bonded identity completes.
+- **Android restart is the only failing case, and why:** the ACL is iPhone-initiated (`dumpsys` shim::acl `is_locally_initiated:false`) and survives the restart (link created 01:26:52 still up after the 01:31:24 restart). Android cannot drop it: `cancelConnection` logs `GATT_Disconnect … Hold link status size=0` and the link stays. The iPhone only gets two Service Changed indications (`Sent Service Changed Ind.` 01:31:24.0 / 01:31:25.3), which do not wake a suspended app.
+- **A TX notification after the restart does not get through either.** Experiment (reverted; diff kept outside the repo): the new run sent a one-chunk `ERROR 8 RESTARTED` notification on TX (same handles, service 154) to the leftover link; `onNotificationSent` fired, the iPhone did nothing in 90 s. iOS invalidates the characteristic on Service Changed.
+- So #1/#2 are ruled out, and #4 (auto-reconnect) cannot help: nothing disconnects. What remains needs Android to reach the iPhone app over the existing link: an iPhone-hosted characteristic Android writes to (doorbell), or the full role flip (#3).

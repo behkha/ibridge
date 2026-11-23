@@ -32,7 +32,7 @@ Goal: iBridge, our own take on iTell (itellapp.com). An Android phone holds the 
 - No unit tests (user rule). Verify by building and running on real devices/emulator/simulator.
 
 ## Next
-1. Background reconnect of a locked iPhone: fails (see docs/notes/background-reconnect.md; hypotheses ranked there, #4 and #3 first).
+1. Background reconnect: out of range works; Android iBridge restart fails (link stays up, iOS never wakes; docs/notes/background-reconnect.md). Awaiting user: A doorbell (iPhone-hosted wake characteristic, recommended) or B full role flip. iPhone must be on USB.
 2. Test "Text back" from the call notification.
 3. Design review for screens without mockups: iPhone pairing, conversation, Keypad, Contacts, Settings; Android "waiting" card.
 
