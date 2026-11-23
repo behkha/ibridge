@@ -1,7 +1,6 @@
 # STATE — iBridge
 
 Goal: iBridge, our own take on iTell (itellapp.com). An Android phone holds the SIM; its texts, contacts, call log and call alerts reach the iPhone over encrypted Bluetooth LE.
-
 ## Approved
 - Phase 1 scope: both apps, QR pairing, encrypted BLE, texts + one-time codes, contacts, call history, incoming-call alerts. No accounts/server. Phase 2 (later): call audio, see research/FINDINGS.md.
 - iPhone design: **A Companion**. Mockups: design/mockups/Main.dc.html (Messages), A-Calls (out of reach), A-Persian (RTL). Canvas: https://claude.ai/artifact/W1RT3rqceZeGiZwpg3VYhs
@@ -18,9 +17,13 @@ Goal: iBridge, our own take on iTell (itellapp.com). An Android phone holds the 
 - ios/ (SwiftUI, iOS 17, XcodeGen) builds on GitHub Actions; Simulator screenshots match Main, A-Calls, A-Persian (fixes for 24h time + Persian code alignment in run 2).
 - Repo: private github.com/behkha/ibridge, CI `.github/workflows/build.yml` (iOS build + screenshots, Android APK).
 - tools/interop/run.py: real Kotlin vs Swift protocol code, 4 scenarios pass. Steps to verify everything: .claude/skills/verify.
-- Fresh-eyes review: 14 findings fixed (call-log LIMIT crash, code-pairing leak, GATT slot theft, iOS restore/BT/cursor/notification bugs).
-- Toolchain: Temurin 21 (~/Library/Java), Android SDK 35, Gradle 8.11.1. REA local, MCP `rea` for this folder.
+- Fresh-eyes review: 14 findings fixed (call-log crash, code-pairing leak, GATT slot theft, iOS reconnect bugs).
+- Toolchain: Temurin 21 (~/Library/Java), Android SDK 35, Gradle 8.11.1, libimobiledevice. REA local.
 - iTell APK in research/target; duplicate in research/artifacts (delete only with the user's OK).
+
+- END TO END WORKS (2026-11-23): iPhone 17 (iOS 27.2.1) paired with the S21 Ultra by QR; full text + call history synced; background reconnect in ~11 s after Android restart (idevicesyslog).
+- iPhone install: free Apple ID + AltServer 1.8.4 (notarized, ~/Applications), hold Option on its menu → Sideload .ipa → build-ipa/iBridge-unsigned.ipa from CI artifact `ios-ipa-unsigned`. Re-sign every 7 days. Wi-Fi path to AltServer is blocked here; USB works.
+- Repo made public (user's choice) after stripping research/ and switching commit email to no-reply. iOS CI often waits for Apple-silicon runners; re-run when cancelled.
 
 ## Decisions
 - Own protocol, not iTell-compatible. Android = BLE GATT peripheral, iPhone = central (bluetooth-central background mode, state restoration).
@@ -31,8 +34,9 @@ Goal: iBridge, our own take on iTell (itellapp.com). An Android phone holds the 
 - No unit tests (user rule). Verify by building and running on real devices/emulator/simulator.
 
 ## Next
-1. Pairing + texts end to end on real phones (needs the iPhone install route).
+1. Live-use checks on the real phones: OTP code card, incoming-call alert + Decline/Text back, sending a text from the iPhone, long out-of-range periods.
 2. Design review for screens without mockups: iPhone pairing, conversation, Keypad, Contacts, Settings; Android "waiting" home card.
+3. Faster first sync (newest texts first).
 
 ## Open questions
-- Who signs the iPhone app (TestFlight needs someone's paid Apple Developer account)?
+- Long term: 7-day free signing is fine for testing; a paid Apple account would allow TestFlight.
