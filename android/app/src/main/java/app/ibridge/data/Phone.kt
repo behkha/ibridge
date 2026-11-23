@@ -61,9 +61,18 @@ class Phone(private val context: Context) {
 
     // ---- SIM slots ----
 
+    @Volatile private var subsCache: Pair<Long, List<android.telephony.SubscriptionInfo>>? = null
+
+    /** The active SIMs, cached for 10 s: a sync asks once per text, and each ask is a system call. */
     @SuppressLint("MissingPermission")
-    private fun subscriptions() = if (has(Manifest.permission.READ_PHONE_STATE))
-        context.getSystemService(SubscriptionManager::class.java).activeSubscriptionInfoList.orEmpty() else emptyList()
+    private fun subscriptions(): List<android.telephony.SubscriptionInfo> {
+        if (!has(Manifest.permission.READ_PHONE_STATE)) return emptyList()
+        val now = System.currentTimeMillis()
+        subsCache?.let { (at, list) -> if (now - at < 10_000) return list }
+        val list = context.getSystemService(SubscriptionManager::class.java).activeSubscriptionInfoList.orEmpty()
+        subsCache = now to list
+        return list
+    }
 
     private fun slotForSub(subId: Int): Int = subscriptions().firstOrNull { it.subscriptionId == subId }?.simSlotIndex?.plus(1) ?: 1
 
@@ -138,7 +147,7 @@ class Phone(private val context: Context) {
             else -> "missed"
         }
         val account = c.getString(6)
-        val sim = subscriptions().firstOrNull { account != null && (account == it.subscriptionId.toString() || account == it.iccId) }
+        val sim = subscriptions().firstOrNull { account != null && (account == it.subscriptionId.toString()) }
             ?.simSlotIndex?.plus(1) ?: 1
         return JSONObject()
             .put("id", c.getLong(0).toString())

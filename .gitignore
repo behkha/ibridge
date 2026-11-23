@@ -19,3 +19,4 @@ tools/interop/.gradle/
 tools/interop/.kotlin/
 android/.kotlin/
 research/
+build-ipa/

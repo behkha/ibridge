@@ -1,6 +1,7 @@
 import CoreBluetooth
 import Foundation
 import os
+import UIKit
 
 /// The iPhone as BLE central (PROTOCOL.md section 1): finds the Android peripheral, runs the handshake,
 /// keeps reconnecting in the background through state restoration.
@@ -86,8 +87,10 @@ final class Central: NSObject {
         guard manager.state == .poweredOn, peripheral == nil else { return }
         if pairing == nil, store.peer == nil { return }
         if pairing == nil, let id = lastKnown, !isIgnored(id), let p = manager.retrievePeripherals(withIdentifiers: [id]).first {
+            log.notice("pending connect to last known \(id.uuidString.prefix(8), privacy: .public)")
             connect(p) // pending connects never time out on iOS
         }
+        log.notice("scanning")
         manager.scanForPeripherals(withServices: [Proto.service], options: nil)
         if store.peer != nil, store.link == .linked { store.link = .connecting }
     }
@@ -118,6 +121,7 @@ final class Central: NSObject {
     }
 
     private func lost() {
+        log.notice("link lost; app state \(Self.appState, privacy: .public)")
         reset()
         if store.peer != nil {
             if case .outOfReach = store.link {} else { store.link = .outOfReach(since: Date()) }
@@ -161,8 +165,9 @@ final class Central: NSObject {
                 PeerStore.save(peer)
                 store.adopt(peer)
                 lastKnown = peripheral?.identifier
-                log.info("paired with \(peer.name, privacy: .public)")
+                log.notice("paired with \(peer.name, privacy: .public)")
             case .live:
+                log.notice("live")
                 store.link = .linked
                 lastKnown = peripheral?.identifier
                 manager.stopScan()
@@ -213,6 +218,14 @@ final class Central: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.connectOrScan() }
     }
 
+    private static var appState: String {
+        switch UIApplication.shared.applicationState {
+        case .active: "active"
+        case .inactive: "inactive"
+        default: "background"
+        }
+    }
+
     private func deviceName() -> String {
         var info = utsname()
         uname(&info)
@@ -224,6 +237,7 @@ final class Central: NSObject {
 extension Central: CBCentralManagerDelegate {
     nonisolated func centralManagerDidUpdateState(_ central: CBCentralManager) {
         MainActor.assumeIsolated {
+            log.notice("bluetooth state \(central.state.rawValue, privacy: .public), restored \(self.peripheral != nil, privacy: .public)")
             guard central.state == .poweredOn else {
                 // Powering off cancels connects without callbacks: forget them so power-on starts clean.
                 if store.peer != nil, store.link == .linked { store.link = .outOfReach(since: Date()) }
@@ -242,6 +256,7 @@ extension Central: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, willRestoreState dict: [String: Any]) {
         MainActor.assumeIsolated {
+            log.notice("state restoration")
             if let p = (dict[CBCentralManagerRestoredStatePeripheralsKey] as? [CBPeripheral])?.first {
                 peripheral = p
                 p.delegate = self
@@ -251,6 +266,7 @@ extension Central: CBCentralManagerDelegate {
 
     nonisolated func centralManager(_ central: CBCentralManager, didDiscover p: CBPeripheral, advertisementData: [String: Any], rssi RSSI: NSNumber) {
         MainActor.assumeIsolated {
+            log.notice("discovered \(p.identifier.uuidString.prefix(8), privacy: .public) rssi \(RSSI.intValue, privacy: .public)")
             if isIgnored(p.identifier) { return }
             if let cur = peripheral {
                 // Keep a live or in-progress link to this same phone. A pending connect to an old
@@ -264,11 +280,17 @@ extension Central: CBCentralManagerDelegate {
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didConnect p: CBPeripheral) {
-        MainActor.assumeIsolated { p.discoverServices([Proto.service]) }
+        MainActor.assumeIsolated {
+            log.notice("connected \(p.identifier.uuidString.prefix(8), privacy: .public)")
+            p.discoverServices([Proto.service])
+        }
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didFailToConnect p: CBPeripheral, error: Error?) {
-        MainActor.assumeIsolated { if p == peripheral { lost() } }
+        MainActor.assumeIsolated {
+            log.notice("connect failed: \(String(describing: error), privacy: .public)")
+            if p == peripheral { lost() }
+        }
     }
 
     nonisolated func centralManager(_ central: CBCentralManager, didDisconnectPeripheral p: CBPeripheral, error: Error?) {
@@ -323,6 +345,7 @@ enum ModelNames {
             "iPhone15,3": "iPhone 14 Pro Max", "iPhone15,4": "iPhone 15", "iPhone15,5": "iPhone 15 Plus", "iPhone16,1": "iPhone 15 Pro",
             "iPhone16,2": "iPhone 15 Pro Max", "iPhone17,3": "iPhone 16", "iPhone17,4": "iPhone 16 Plus", "iPhone17,1": "iPhone 16 Pro",
             "iPhone17,2": "iPhone 16 Pro Max", "iPhone17,5": "iPhone 16e",
+            "iPhone18,1": "iPhone 17 Pro", "iPhone18,2": "iPhone 17 Pro Max", "iPhone18,3": "iPhone 17", "iPhone18,4": "iPhone Air",
         ]
         return table[id] ?? "iPhone"
     }

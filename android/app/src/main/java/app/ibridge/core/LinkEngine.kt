@@ -74,7 +74,10 @@ class LinkEngine(
     /** Encrypts and sends one JSON message. False when no live session exists. */
     fun sendMessage(msg: JSONObject): Boolean {
         val live = step as? Live ?: return false
-        send(live.cipher.seal(msg.toString().toByteArray()))
+        val plain = msg.toString().toByteArray()
+        // A record over the packet limit would make the iPhone drop the link; skip it instead.
+        if (plain.size > Proto.MAX_PACKET - 1 - 8 - 16) { log("dropped ${msg.optString("t")}: ${plain.size} bytes"); return false }
+        send(live.cipher.seal(plain))
         return true
     }
 

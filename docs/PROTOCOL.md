@@ -182,10 +182,11 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 
 ### Sync and cursors
 
-- The cursor is opaque to I. `null` means "from the start": texts and calls from the last **30 days**, contacts from the first one.
-- A returns items oldest first (texts, calls) and sets `more` while items remain. I asks again with the returned cursor.
+- The cursor is opaque to I. `null` means "from the start": the **full history** of texts, calls and contacts.
+- A returns items oldest first and sets `more` while items remain. I asks again with the returned cursor. A page holds at most `limit` items and about **40 KB** of JSON, so a record stays well under the packet limit.
+- A record that would still exceed the packet limit is not sent (A logs it).
 - On every `hello` I re-syncs `sms` and `calls` from its stored cursors, so a text received while the link was down still arrives. Live `sms`/`call` messages and page items share ids, so I de-duplicates by `id`.
-- A cursor is `"<last id>|<since ts>"`. I moves it past each live item's numeric `id` while no paged sync of that kind is running, so a reconnect only fetches what it missed.
+- A cursor is `"v2:<last id>"`; A treats any other cursor as `null`. I moves it past each live item's numeric `id` while no paged sync of that kind is running, so a reconnect only fetches what it missed.
 - Contacts are re-synced from `null` when the user pulls to refresh or `status.perms.contacts` turns true.
 
 ### One-time codes

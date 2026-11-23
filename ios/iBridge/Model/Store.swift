@@ -145,10 +145,10 @@ final class Store {
 
     /// Moves a sync cursor forward past a live item, unless a paged sync of that kind is still running.
     private func advance(_ kind: String, to id: String) {
-        guard !syncing.contains(kind), let n = Int64(id) else { return }
-        let current = cursors[kind].flatMap { Int64($0.split(separator: "|").first ?? "") } ?? -1
-        guard current >= 0, n > current else { return } // no cursor yet: the first sync sets it
-        cursors[kind] = "\(n)|0"
+        guard !syncing.contains(kind), let n = Int64(id),
+              let cursor = cursors[kind], cursor.hasPrefix("v2:"), let current = Int64(cursor.dropFirst(3)),
+              n > current else { return } // no v2 cursor yet: the next full sync sets it
+        cursors[kind] = "v2:\(n)"
     }
 
     /// A newly paired phone: drop what came from a different one.

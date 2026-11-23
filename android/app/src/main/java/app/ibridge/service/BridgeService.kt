@@ -158,23 +158,35 @@ class BridgeService : Service() {
         Link.setSignal(phone.signalLevel())
     }
 
+    /**
+     * One page of history (PROTOCOL.md 6, "Sync and cursors"). Full history, oldest first.
+     * Pages stop at [limit] items or about 40 KB of JSON, whichever comes first, so a record never
+     * nears the 64 KB packet limit. Cursors are "v2:<last id>"; anything else starts over from the
+     * beginning (older iPhones held 30-day cursors), and the iPhone de-duplicates by id.
+     */
     private fun sync(m: JSONObject) {
         val kind = m.optString("kind")
         val limit = m.optInt("limit", 200).coerceIn(1, 200)
         val cursor = if (m.isNull("cursor")) null else m.optString("cursor")
-        val (afterId, since) = cursor?.split('|')?.let { (it[0].toLongOrNull() ?: 0) to (it.getOrNull(1)?.toLongOrNull() ?: 0) }
-            ?: (0L to System.currentTimeMillis() - 30L * 24 * 3600 * 1000)
+        val afterId = cursor?.takeIf { it.startsWith("v2:") }?.removePrefix("v2:")?.toLongOrNull() ?: 0L
         val items = when (kind) {
-            "sms" -> phone.smsAfter(afterId, since, limit + 1)
-            "calls" -> phone.callsAfter(afterId, since, limit + 1)
+            "sms" -> phone.smsAfter(afterId, 0, limit + 1)
+            "calls" -> phone.callsAfter(afterId, 0, limit + 1)
             "contacts" -> phone.contactsAfter(afterId, limit + 1)
             else -> return
         }
-        val page = items.take(limit)
+        val page = ArrayList<JSONObject>()
+        var bytes = 0
+        for (item in items.take(limit)) {
+            val size = item.toString().toByteArray().size
+            if (page.isNotEmpty() && bytes + size > PAGE_BYTES) break
+            page += item
+            bytes += size
+        }
         val last = page.lastOrNull()?.getString("id") ?: afterId.toString()
         push(
             JSONObject().put("t", "page").put("kind", kind).put("items", JSONArray(page))
-                .put("cursor", "$last|$since").put("more", items.size > limit)
+                .put("cursor", "v2:$last").put("more", items.size > page.size)
         )
     }
 
@@ -309,6 +321,7 @@ class BridgeService : Service() {
         const val TAG = "iBridge"
         const val CHANNEL = "link"
         const val ACTION_UNLINK = "app.ibridge.UNLINK"
+        const val PAGE_BYTES = 40_000
 
         /** The name the user sees in Settings ("Galaxy S21 Ultra"), not the model code ("SM-G998B"). */
         fun deviceName(context: Context): String =
