@@ -287,9 +287,10 @@ class Gatt(
             if (descriptor.uuid == Proto.CCCD && descriptor.characteristic.uuid == Proto.TX) {
                 val on = value != null && value.isNotEmpty() && (value[0].toInt() and 1) == 1
                 if (!on) { if (d == device) subscribed = false; return@post }
-                // The iPhone subscribes once per connection. On a radio link that stayed up, Android never saw a
-                // disconnect, so a subscribe from the slot holder starts a new session: drop the old one's state.
-                if (d == device && subscribed) { Log.i(TAG, "central subscribed again; fresh session"); resetConnection() }
+                // On a radio link that stayed up, Android never saw a disconnect, so a subscribe from the holder of a
+                // live session means the iPhone started over: drop the old session's state. A repeat subscribe during
+                // the handshake is normal (iOS restores a bonded subscription, then the app subscribes) and is ignored.
+                if (d == device && engine?.isLive == true) { Log.i(TAG, "central subscribed again; fresh session"); resetConnection() }
                 if (!claim(d)) { server?.cancelConnection(d); return@post } // one iPhone at a time
                 subscribed = true
                 pump()
