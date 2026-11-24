@@ -8,7 +8,7 @@ Goal: our own iTell. Android holds the SIM; texts, contacts, calls and call aler
 - Android design: **Checklist**. Mockups: design/mockups/E-Checklist, E-QR (pairing sheet), F-Status (home).
   - A denied row turns orange without blocking the others, and the home screen reuses the list for warnings.
   - The QR is always black on white, expires with a countdown, and has a fallback code, LTR even in RTL.
-- Round 2 (2026-11-24, built + verified; canvas page "Screens round 2"): pairing **Viewfinder**, conversation **Native**, Keypad **Text pad**, Contacts **Quick text**, Settings **Phone card**, Android away card **Quiet**. Liquid Glass: **system glass only** (CI on Xcode 26 so system tab bar/nav bars/sheets go glass; our buttons, composer, pairing controls stay flat as drawn). Sleek skill declined.
+- Round 2 (2026-11-24, built + verified on both phones; canvas page "Screens round 2"): Viewfinder pairing, Native conversation, Text pad, Quick text contacts, Phone card settings, Android Quiet away card. Liquid Glass: system glass only (CI on Xcode 26).
 - Toolchain install approved 2026-11-23. Devices: Android 12+ phone, iOS 17+ iPhone.
 ## Done
 - docs/PROTOCOL.md v1: GATT `e38d0001…`, chunk framing, QR + typed-code pairing (5×6-bit rounds, Android reveals first), triple-DH session, JSON messages.
@@ -36,7 +36,6 @@ Goal: our own iTell. Android holds the SIM; texts, contacts, calls and call aler
    - Read/delete on Android never reach the iPhone (sms re-pushed only on pending→ok/failed).
    - New Android contacts only arrive on pull-to-refresh or a perms change.
    - "N texts will follow" (Android away card) and catch-up sync after reconnect not yet seen on the phones.
-2. Polish leftovers (later): unused Persian keys in Localizable.xcstrings; per-keystroke recompute in conversation.
-   - Device evidence with real data stays out of the repo (public).
+2. Later polish: unused Persian keys; per-keystroke recompute in conversation. Real-data screenshots stay out of the (public) repo.
 ## Open questions
 - Paid Apple account would allow TestFlight (7-day free signing is fine for now).
