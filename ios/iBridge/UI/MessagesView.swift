@@ -57,8 +57,10 @@ private struct ThreadCell: View {
                 HStack(alignment: .top, spacing: 8) {
                     Text(row.last.body)
                         .font(.app(Font.isPersian ? 14 : 15)).foregroundStyle(Palette.preview)
+                        .multilineTextAlignment(.leading)
                         .lineLimit(2).lineSpacing(Font.isPersian ? 4 : 2)
                         .frame(maxWidth: .infinity, alignment: .leading)
+                        .environment(\.layoutDirection, Fmt.isRTL(row.last.body) ? .rightToLeft : .leftToRight) // each preview in its own direction
                     if row.unread > 0 {
                         Text(Fmt.digits("\(row.unread)"))
                             .font(.app(13, .semibold)).foregroundStyle(.white)

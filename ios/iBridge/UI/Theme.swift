@@ -93,8 +93,16 @@ enum Fmt {
             if rest.count > 3 { parts.append(String(rest.dropFirst(3))) }
             return digits(parts.joined(separator: " "))
         }
-        if n.hasPrefix("+98"), n.dropFirst().allSatisfy(\.isNumber), d.count == 12 { // +98 912 111 0001
-            return digits("+98 \(d.dropFirst(2).prefix(3)) \(d.dropFirst(5).prefix(3)) \(d.dropFirst(8))")
+        if n.hasPrefix("+98"), n.dropFirst().allSatisfy(\.isNumber), d.count > 5 {
+            // +98 912 111 0001; shorter service numbers in threes: +98 500 031 04
+            let rest = Array(d.dropFirst(2))
+            var groups: [String] = []
+            var i = 0
+            while i < rest.count {
+                let size = rest.count - i <= 4 ? rest.count - i : 3
+                groups.append(String(rest[i..<i + size])); i += size
+            }
+            return digits("+98 " + groups.joined(separator: " "))
         }
         return digits(n)
     }
