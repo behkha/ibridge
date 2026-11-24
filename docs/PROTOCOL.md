@@ -4,7 +4,7 @@ The Android phone (holds the SIM) and the iPhone talk over Bluetooth LE only. Th
 Every byte after the handshake is encrypted end to end with keys that exist only on the two phones.
 
 Roles: **A** = Android, the GATT **peripheral** (advertises, hosts the service). **I** = iPhone, the GATT **central** (scans, connects).
-iOS keeps a central alive in the background (`bluetooth-central` mode + state restoration); it does not advertise for a backgrounded peripheral, and it does not wake a suspended app for writes to its own GATT server, so the roles are fixed.
+iOS keeps a central alive in the background (`bluetooth-central` mode + state restoration); it does not advertise for a backgrounded peripheral, so the roles are fixed.
 
 Byte order is big-endian. `||` is concatenation. Public keys are P-256 in uncompressed X9.63 form (65 bytes, `04 || X || Y`) unless stated.
 
@@ -18,10 +18,10 @@ Byte order is big-endian. `||` is concatenation. Public keys are P-256 in uncomp
 
 `RX` writes and the `TX` CCCD require an **encrypted link**, so the first connection makes the phones bond at the OS level (LE Secure Connections, one system prompt on each phone). The bond is for reconnection, not secrecy: with Android's identity key iOS resolves its rotating address, and a pending `connect` completes even while iBridge is suspended. All protection still comes from sections 4 and 5.
 
-- **Leftover link**: when A's iBridge restarts, the radio link I opened stays up, and I hears only Service Changed. iOS wakes a suspended app neither for that nor for notifications on the replaced characteristics, and a GATT server cannot drop a link it did not open. So when A's GATT server starts and the iPhone that last held a live session is still on the link, A opens a GATT client connection on that link and releases it at once; with no app holding the link, Android's stack drops it after about 1 s. I wakes on the disconnect and its pending connect reaches the new run. A touches no other device's link.
+- **Leftover link**: when A's iBridge restarts, the radio link I opened stays up, and I hears only Service Changed. iOS wakes a suspended app neither for that nor for notifications on the replaced characteristics, and a GATT server cannot drop a link it did not open. So when A's GATT server starts and the iPhone that last held a live session is still on the link 2 s later without claiming the slot, A opens a GATT client connection on that link and releases it at once; with no app holding the link, Android's stack drops it after about 1 s. I wakes on the disconnect and its pending connect reaches the new run. A touches no other device's link.
 - **Advertising**: A advertises the 128-bit service UUID, connectable, no name, `ADVERTISE_MODE_LOW_POWER` while linked or idle and `LOW_LATENCY` while the pairing sheet is open. iOS background scans must filter on this UUID.
 - **Identity** is proven by the handshake, not by the address: Android rotates its address. I caches the peripheral identifier of the last good link and calls `connect` on it (pending connects never time out on iOS). If a handshake with some peripheral fails with `NOT_PAIRED`, I ignores that identifier for 15 minutes.
-- **One link at a time**: A's GATT server sees every LE link the phone has (watches, earbuds), so a central takes A's single iBridge slot only when it subscribes to `TX` or writes `RX`. Another central that does either while the slot is taken is disconnected. A central with no live session 20 s after taking the slot is disconnected. A keeps advertising until a session is live.
+- **One link at a time**: A's GATT server sees every LE link the phone has (watches, earbuds), so a central takes A's single iBridge slot only when it subscribes to `TX` or writes `RX`. Another central that does either while the slot is taken is disconnected. A central with no live session 20 s after taking the slot is disconnected. A subscribe to `TX` from the holder of a live session means I started over on a link that never dropped: A discards the old session and treats it as a new claim. A keeps advertising until a session is live.
 - **MTU**: I lets iOS negotiate (typically 185 to 517). A records `onMtuChanged`. Chunk size = `MTU − 3`; default MTU 23 gives 20-byte chunks.
 
 ## 2. Framing

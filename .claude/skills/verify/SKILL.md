@@ -37,7 +37,10 @@ $A shell dumpsys bluetooth_manager | grep -A1 mAdvertisingServiceUuids          
 
 ## 2b. Reconnect test (locked iPhone)
 - iPhone log over USB: `idevicesyslog -p iBridge` (libimobiledevice). Link lines: discovered / connected / live / link lost.
-- Restart Android's side: `$A shell am force-stop app.ibridge.android` then `$A shell am start-foreground-service -n app.ibridge.android/app.ibridge.service.BridgeService` (the class lives in namespace `app.ibridge`, not the package). Check `logcat` shows iBridge lines, or the test measured nothing.
+- Lock the iPhone at least 1 minute first (iBridge suspended).
+- Restart Android's side: `$A shell am force-stop app.ibridge.android`, then `$A shell am start -n app.ibridge.android/app.ibridge.MainActivity` and `$A shell input keyevent KEYCODE_HOME` (the service is not exported, so `start-foreground-service` fails). Check `logcat` shows iBridge lines, or the test measured nothing.
+- Expect `leftover link: held, now released`, then `← hello` within ~10 s; the iPhone shows `link lost; app state background` then `live`. Android only releases the link of the iPhone saved in `shared_prefs/gatt.xml` (set when a session goes live): a fresh install has none until the first link.
+- Text back: call the Android SIM, press and hold the alert on the iPhone, Text back; Android logs `← call.decline`, `← send`, `→ sent`.
 - Wait for `← hello` in `$A logcat -s iBridge`; message types are logged as → / ←.
 - Who is scanning on the iPhone: `idevicesyslog | grep ScanParams` lists scan agents.
 

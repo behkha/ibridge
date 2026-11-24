@@ -232,13 +232,15 @@ class Gatt(
      * sit on a dead session. A GATT server cannot drop a link it did not open, but a GATT client can: open and
      * release a client connection on it, and with no app holding the link the stack drops it after 1 s
      * (PROTOCOL.md section 1). The iPhone wakes on the disconnect and its pending connect reaches this run.
-     * Only the paired iPhone's link is touched, never a watch's or a computer's.
+     * Only the link of the iPhone that last held a live session is touched, never a watch's or a computer's.
      */
     private fun releaseLeftoverLink() {
         val last = prefs.getString("iphone", null) ?: return
-        manager.getConnectedDevices(BluetoothProfile.GATT_SERVER)
-            .filter { it.address == last && it != device }
-            .forEach { release(it) }
+        fun leftover() = manager.getConnectedDevices(BluetoothProfile.GATT_SERVER).filter { it.address == last && it != device }
+        if (leftover().isEmpty()) return
+        // An awake iPhone reconnects to this run by itself within a second or two; give it that time so a fresh
+        // link is not released. A suspended one cannot, and loses only these 2 s.
+        post(delayMs = 2_000) { leftover().forEach { release(it) } }
     }
 
     private fun release(d: BluetoothDevice) {

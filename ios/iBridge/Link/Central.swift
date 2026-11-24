@@ -30,6 +30,10 @@ final class Central: NSObject {
 
     private var watchdog: Timer?
     private var pingSentAt: Date?
+    /// Connected, but Android's iBridge service wasn't there yet: its next advertisement means it is.
+    private var serviceMissing = false
+    /// Seconds before the next reconnect: 1, doubling to 60 while attempts keep failing; back to 1 once live.
+    private var retryDelay: Double = 1
 
     init(store: Store) {
         self.store = store
@@ -93,10 +97,13 @@ final class Central: NSObject {
 
     // MARK: connection
 
-    /// Drops the connection and connects again; the pause lets iOS finish the cancel before the new connect.
+    /// Drops the connection and connects again; the pause lets iOS finish the cancel before the new connect,
+    /// and grows while attempts keep failing (lost bond, foreign build) so the radio never spins.
     private func reconnect() {
         disconnect()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.connectOrScan() }
+        let delay = retryDelay
+        retryDelay = min(retryDelay * 2, 60)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.connectOrScan() }
     }
 
     /// Keeps a scan and a pending connect running while not linked. With `probe`, pings a link that looks live:
@@ -155,6 +162,7 @@ final class Central: NSObject {
 
     private func reset() {
         pingSentAt = nil
+        serviceMissing = false
         peripheral = nil
         rx = nil
         handshake = nil
@@ -211,6 +219,7 @@ final class Central: NSObject {
                 log.notice("paired with \(peer.name, privacy: .public)")
             case .live:
                 log.notice("live")
+                retryDelay = 1
                 store.link = .linked
                 lastKnown = peripheral?.identifier
                 manager.stopScan()
@@ -318,7 +327,10 @@ extension Central: CBCentralManagerDelegate {
                 // identifier is dropped: Android rotates its address, so the scan result wins.
                 if cur.identifier == p.identifier || cur.state == .connected {
                     // Connected before Android's iBridge service was up: its advertising means the service is here now.
-                    if cur.identifier == p.identifier, cur.state == .connected, rx == nil { cur.discoverServices([Proto.service]) }
+                    if cur.identifier == p.identifier, cur.state == .connected, serviceMissing {
+                        serviceMissing = false
+                        cur.discoverServices([Proto.service])
+                    }
                     return
                 }
                 manager.cancelPeripheralConnection(cur)
@@ -354,8 +366,10 @@ extension Central: CBPeripheralDelegate {
             // didModifyServices or the watchdog retries discovery.
             guard let s = p.services?.first(where: { $0.uuid == Proto.service }) else {
                 log.notice("connected, but Android's iBridge service isn't there yet; waiting")
+                serviceMissing = true
                 return
             }
+            serviceMissing = false
             p.discoverCharacteristics([Proto.rx, Proto.tx], for: s)
         }
     }

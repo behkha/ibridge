@@ -20,6 +20,7 @@ Goal: iBridge, our own take on iTell (itellapp.com). An Android phone holds the 
 - iTell APK in research/target; duplicate in research/artifacts (delete only with the user's OK).
 - Verified on real phones 2026-11-24: send text, OTP code card, call alert + Decline, full history. OS bond added (encrypted GATT).
 - 2026-11-23: iPhone 17 (iOS 27.2.1) paired with the S21 Ultra by QR.
+- 2026-11-24: locked iPhone relinks by itself: out of range (~1 s) and Android restart (4-6 s; Android releases the leftover link, PROTOCOL §1). Text back verified. Notes: docs/notes/background-reconnect.md.
 - iPhone install: free Apple ID + AltServer 1.8.4 (notarized, ~/Applications), hold Option on its menu → Sideload .ipa → build-ipa/iBridge-unsigned.ipa from CI artifact `ios-ipa-unsigned`. Re-sign every 7 days. Wi-Fi path to AltServer is blocked here; USB works.
 - Repo public github.com/behkha/ibridge (user's choice; research/ stripped, no-reply email). CI `.github/workflows/build.yml`; iOS jobs often wait for Apple-silicon runners, re-run when cancelled.
 
@@ -32,9 +33,7 @@ Goal: iBridge, our own take on iTell (itellapp.com). An Android phone holds the 
 - No unit tests (user rule). Verify by building and running on real devices/emulator/simulator.
 
 ## Next
-1. Background reconnect: out of range works; Android iBridge restart fails (link stays up, iOS never wakes; docs/notes/background-reconnect.md). Awaiting user: A doorbell (iPhone-hosted wake characteristic, recommended) or B full role flip. iPhone must be on USB.
-2. Test "Text back" from the call notification.
-3. Design review for screens without mockups: iPhone pairing, conversation, Keypad, Contacts, Settings; Android "waiting" card.
+1. Design review for screens without mockups: iPhone pairing, conversation, Keypad, Contacts, Settings; Android "waiting" card.
 
 ## Open questions
 - Long term: 7-day free signing is fine for testing; a paid Apple account would allow TestFlight.
