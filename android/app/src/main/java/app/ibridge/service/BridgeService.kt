@@ -49,6 +49,8 @@ class BridgeService : Service() {
 
     /** Every text's read bit and type at the last look; the SMS observer diffs against it. */
     private var smsStates: HashMap<Long, Int>? = null
+    /** Highest text id seen while running: a "new" id at or below it is a reused one. */
+    private var maxSmsId = 0L
     /** Highest call-log `_id` already pushed live, so the observer only sends new rows. */
     private var lastCallId = 0L
     private var lastStatusAt = 0L
@@ -219,8 +221,12 @@ class BridgeService : Service() {
         away.edit().putStringSet(key, HashSet(away.getStringSet(key, emptySet())!!).apply { ids.forEach { add(it.toString()) } }).apply()
     }
     private fun clearAway(key: String) = away.edit().remove(key).apply()
+    private fun dropAway(key: String, ids: Set<Long>) {
+        val kept = away.getStringSet(key, emptySet())!!.filterNot { it.toLongOrNull() in ids }.toSet()
+        away.edit().putStringSet(key, kept).apply()
+    }
 
-    /** `sms.read` / `sms.gone` in messages of at most 500 ids. False when any part could not be sent. */
+    /** `sms.read`, `sms.gone`, `calls.gone` in messages of at most 500 ids. False when any part could not be sent. */
     private fun pushIds(type: String, ids: Collection<Long>): Boolean =
         ids.isEmpty() || ids.sorted().chunked(500).map { chunk -> push(JSONObject().put("t", type).put("ids", JSONArray(chunk.map(Long::toString)))) }.all { it }
 
@@ -320,10 +326,21 @@ class BridgeService : Service() {
         val before = smsStates ?: run { smsStates = now; return }
         smsStates = now
         val added = now.keys.filter { it !in before }
+        // The text store reuses the highest id after a delete: that id is not gone any more, and the iPhone's
+        // cursor is already past it, so its row has to come by catch-up, not by cursor sync.
+        val reused = added.filter { it <= maxSmsId }.toSet()
+        if (reused.isNotEmpty()) {
+            dropAway("gone", reused)
+            recent.replaceAll { (t, key, ids) -> Triple(t, key, if (key == "gone") ids - reused else ids) }
+        }
+        maxSmsId = maxOf(maxSmsId, now.keys.maxOrNull() ?: 0)
         val restated = now.filter { (id, v) -> before[id]?.let { it shr 1 != v shr 1 } == true }.keys
         val read = now.filter { (id, v) -> before[id]?.let { it and 1 == 0 && v and 1 == 1 } == true }.keys
         val gone = before.keys.filter { it !in now }
-        phone.smsByIds(added).forEach(::pushNewSms)
+        phone.smsByIds(added).forEach { item ->
+            val id = item.getString("id").toLong()
+            if (!pushNewSms(item) && id in reused) keepAway("state", listOf(id))
+        }
         val (pushed, missed) = phone.smsByIds(restated).partition { push(JSONObject(it.toString()).put("t", "sms")) }
         keepAway("state", missed.map { it.getString("id").toLong() })
         remember("state", pushed.map { it.getString("id").toLong() })
@@ -333,10 +350,11 @@ class BridgeService : Service() {
         }
     }
 
-    private fun pushNewSms(item: JSONObject) {
+    /** False when the link is down. */
+    private fun pushNewSms(item: JSONObject): Boolean {
         if (!push(JSONObject(item.toString()).put("t", "sms"))) {
             if (Link.peer != null && item.optString("dir") == "in") Link.countWaiting()
-            return
+            return false
         }
         Link.countSent(text = true)
         item.optString("code").takeIf { it.isNotEmpty() }?.let { code ->
@@ -345,6 +363,7 @@ class BridgeService : Service() {
                     .put("from", item.optString("name", item.getString("addr"))).put("ts", item.getLong("ts"))
             )
         }
+        return true
     }
 
     /** Every call-log id at the last look, to find deleted rows. */
@@ -392,6 +411,7 @@ class BridgeService : Service() {
     private fun registerObservers() = gatt.post {
         if (!smsWatched && phone.has(Manifest.permission.READ_SMS)) {
             smsStates = phone.smsStates()
+            maxSmsId = smsStates?.keys?.maxOrNull() ?: 0
             contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, smsObserver)
             smsWatched = true
         }
@@ -435,7 +455,7 @@ class BridgeService : Service() {
             when (i.action) {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> when (i.getIntExtra(BluetoothAdapter.EXTRA_STATE, 0)) {
                     BluetoothAdapter.STATE_ON -> gatt.start()
-                    BluetoothAdapter.STATE_TURNING_OFF -> { gatt.stop(); Link.setConnected(false) }
+                    BluetoothAdapter.STATE_TURNING_OFF -> { gatt.post { keepRecent() }; gatt.stop(); Link.setConnected(false) }
                 }
                 else -> gatt.post { sendStatus() }
             }

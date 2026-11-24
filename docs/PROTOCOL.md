@@ -161,7 +161,7 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 | `read` | `ids`: [sms ids] | — (A marks them read where Android lets it, see "Read state") |
 | `call.decline` | `call` | `call.end` |
 | `ping` | — | `pong` |
-| `unpair` | — | A forgets `I_pub`, then disconnects. When the user unlinks while A is out of reach, I keeps `A_pub` only to send this at the next link (it keeps nothing A sends meanwhile) and forgets it on `NOT_PAIRED` or a new pairing |
+| `unpair` | — | A forgets `I_pub`, then disconnects. When the user unlinks while A is out of reach, I keeps `A_pub` only to send this at the next link (it keeps nothing A sends meanwhile) (even when the link looked live, since `send` only queues) and forgets it on `NOT_PAIRED` from that same phone or a new pairing |
 
 ### Android → iPhone
 
@@ -200,7 +200,7 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 ### While the link is down
 
 Neither side drops what happened while the other was away.
-- **A** keeps, across restarts, the ids of texts it saw change or go while I was away, and whether contacts changed (a change made while A's service was not running is missed for texts; contacts are compared with the last version I was told about). Right after its `status` answer to `hello` it sends an `sms` for each text whose `state` changed and that still exists, then `sms.read`, `sms.gone` and `calls.gone` (at most 500 ids per message), and `contacts.changed`. `push` only queues a message, so changes sent in the 15 s before a link drops (or before I starts over on the same link) are kept and sent again at the next catch-up; every one of these messages is idempotent. New texts and calls come through the cursor sync instead. A `status` is also sent at once when `perms` change.
+- **A** keeps, across restarts, the ids of texts it saw change or go while I was away, and whether contacts changed (a change to texts or the call log made while A's service was not running is missed; contacts are compared with the last version I was told about). Right after its `status` answer to `hello` it sends an `sms` for each text whose `state` changed and that still exists, then `sms.read`, `sms.gone` and `calls.gone` (at most 500 ids per message), and `contacts.changed`. `push` only queues a message, so changes sent in the 15 s before a link drops (or before I starts over on the same link) are kept in memory and sent again at the next catch-up; every one of these messages is idempotent, and I matches a pending text only with an `sms` row it did not have before. Android's text store reuses the highest id after a delete: A then drops that id from its deleted set and sends the new row at catch-up, since I's cursor is already past it. New texts and calls come through the cursor sync instead. A `status` is also sent at once when `perms` change.
 - **I** keeps an outbox of `send` and `read` messages and sends them in order once live. A `send` written to a live link stays in the outbox, shown as a pending text, until A's own `sms` for it arrives (same number, same body, dated at most 5 minutes before it was written); `sent` with `ok: false` shows it as failed. Once the next session's `sms` sync finishes, one still without its `sms` goes if A had answered `sent` ok, and is shown as failed otherwise, for the user to retry; it is never re-sent on its own: a duplicate text is worse than a retry.
 
 ### Read state

@@ -27,6 +27,11 @@ final class Central: NSObject {
     private var retired: PairedPeer? {
         didSet { if let retired, let d = try? JSONEncoder().encode(retired) { Keychain.write("ibridge-retired", d) } else { Keychain.delete("ibridge-retired") } }
     }
+    /// The retired phone's peripheral: only its NOT_PAIRED ends the retirement, not another iBridge phone's.
+    private var retiredID: UUID? {
+        get { UserDefaults.standard.string(forKey: "retired-peripheral").flatMap(UUID.init) }
+        set { UserDefaults.standard.set(newValue?.uuidString, forKey: "retired-peripheral") }
+    }
     private var lastKnown: UUID? {
         get { UserDefaults.standard.string(forKey: "peripheral").flatMap(UUID.init) }
         set { UserDefaults.standard.set(newValue?.uuidString, forKey: "peripheral") }
@@ -72,8 +77,10 @@ final class Central: NSObject {
     }
 
     func unpair() {
-        // Out of reach, Android would wait for this iPhone forever: keep its key only to deliver `unpair` later.
-        if !send(["t": "unpair"]), let p = store.peer { retired = p }
+        // `send` only queues, and Android may be out of reach: keep its key until Android shows it forgot this
+        // iPhone (NOT_PAIRED from that phone), so it never waits for this iPhone forever.
+        send(["t": "unpair"])
+        if let p = store.peer { retired = p; retiredID = lastKnown }
         lastKnown = nil
         store.unpair()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.disconnect() }
@@ -247,15 +254,16 @@ final class Central: NSObject {
             case .send(let p): queue(p)
             case .paired(let peer):
                 pairing = nil
-                retired = nil // a new pairing replaces the old one on Android anyway
+                // Re-pairing the same Android replaces its key there. A different phone: the old one keeps waiting until Unlink on it.
+                retired = nil
                 PeerStore.save(peer)
                 store.adopt(peer)
                 lastKnown = peripheral?.identifier
                 log.notice("paired with \(peer.name, privacy: .public)")
             case .live where store.peer == nil && retired != nil:
                 log.notice("live with the unlinked phone: telling it unpair")
-                send(["t": "unpair"])
-                retired = nil
+                send(["t": "unpair"]) // retired ends when that phone answers NOT_PAIRED on the next try
+                retiredID = peripheral?.identifier
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.disconnect(); self?.manager.stopScan() }
             case .live:
                 log.notice("live")
@@ -298,7 +306,7 @@ final class Central: NSObject {
             switch e {
             case .notPaired where pairing == nil:
                 if let id { ignored[id] = Date() }
-                if store.peer == nil { retired = nil } // Android already forgot this iPhone
+                if store.peer == nil, retired != nil, retiredID == nil || id == retiredID { retired = nil; retiredID = nil } // it forgot this iPhone
                 // Our own Android no longer knows this iPhone: it was unlinked or reinstalled there.
                 if id != nil, id == lastKnown {
                     lastKnown = nil

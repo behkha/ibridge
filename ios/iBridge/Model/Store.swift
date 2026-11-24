@@ -21,6 +21,8 @@ final class Store {
     var cursors: [String: String] = [:]
     /// Kinds with a paged sync in flight; live items must not move their cursor past unfetched pages.
     var syncing: Set<String> = []
+    /// Pages of a contacts sync still running.
+    private var incomingContacts: [Contact] = []
     /// Public key of the Android phone whose texts and calls are stored here.
     var dataOwner: Data?
     /// A one-off problem to show the user, e.g. a text that failed to send.
@@ -164,7 +166,8 @@ final class Store {
         messages[s.id] = s
         _ = tint(for: s.addr)
         // Android dates the row when it sends; 5 minutes of slack for the two phones' clocks keeps an older identical text out.
-        if !s.incoming, let i = outbox.firstIndex(where: { $0.session != nil && s.ts > $0.ts.addingTimeInterval(-300) && Self.sameNumber($0.to, s.addr)
+        // Only a row new to this iPhone: a re-sent one (state change, catch-up) must not take another pending text's place.
+        if !s.incoming, old == nil, let i = outbox.firstIndex(where: { $0.session != nil && s.ts > $0.ts.addingTimeInterval(-300) && Self.sameNumber($0.to, s.addr)
             && $0.body.trimmingCharacters(in: .whitespacesAndNewlines) == s.body.trimmingCharacters(in: .whitespacesAndNewlines) }) {
             outbox.remove(at: i) // Android's record of a text sent from here replaces the pending copy
         }
@@ -233,8 +236,10 @@ final class Store {
             }
         case "calls": items.compactMap(Call.init).forEach { addCall($0) } // calls missed while away: recent ones alert
         case "contacts":
+            // Collected apart and swapped in at the end: a sync cut off by a dropped link leaves the old list whole.
             let fresh = items.compactMap(Contact.init)
-            if cursors["contacts"] == nil { contacts = fresh } else { contacts += fresh }
+            incomingContacts = (cursors["contacts"] == nil ? [] : incomingContacts) + fresh
+            if !(m.bool("more") ?? false) { contacts = incomingContacts; incomingContacts = [] }
         default: return
         }
         cursors[kind] = m.str("cursor")
