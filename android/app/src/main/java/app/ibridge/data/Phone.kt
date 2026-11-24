@@ -200,6 +200,16 @@ class Phone(private val context: Context) {
         )?.use { c -> buildList { while (c.moveToNext()) add(callItem(c)) } }.orEmpty()
     }
 
+    /** Every call-log `_id`, to find deleted rows; null when the read fails (never taken for "all deleted"). */
+    fun callIds(): HashSet<Long>? {
+        if (!has(Manifest.permission.READ_CALL_LOG)) return null
+        return runCatching {
+            resolver.query(CallLog.Calls.CONTENT_URI, arrayOf(CallLog.Calls._ID), null, null, null)?.use { c ->
+                HashSet<Long>(c.count * 2).apply { while (c.moveToNext()) add(c.getLong(0)) }
+            }
+        }.getOrNull()
+    }
+
     fun latestCallId(): Long = maxId(CallLog.Calls.CONTENT_URI, CallLog.Calls._ID, Manifest.permission.READ_CALL_LOG)
 
     // ---- contacts ----

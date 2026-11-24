@@ -87,10 +87,8 @@ struct Chat: Hashable {
 /// Approved C1 "Native" (canvas page Screens round 2): iOS bubbles, the SIM in the composer, inline retry.
 struct ConversationView: View {
     @Environment(Store.self) private var store
-    @Environment(\.central) private var central
     @Environment(\.scenePhase) private var scenePhase
     var chat: Chat
-    @State private var draft = ""
 
     var body: some View {
         // A "to:" thread holds only queued texts: once Android's copy arrives, the number's real thread takes over.
@@ -130,7 +128,7 @@ struct ConversationView: View {
                 .scrollDismissesKeyboard(.interactively)
                 .onChange(of: items.last?.id) { proxy.scrollTo(items.last?.id, anchor: .bottom) }
             }
-            composer(addr: addr, sim: sim, showSim: sims > 1)
+            Composer(addr: addr, sim: sim, showSim: sims > 1)
         }
         .background(Color.white)
         .navigationBarTitleDisplayMode(.inline)
@@ -165,8 +163,18 @@ struct ConversationView: View {
     static func sameGroup(_ a: SMS, _ b: SMS) -> Bool {
         a.dir == b.dir && Calendar.current.isDate(a.ts, inSameDayAs: b.ts) && b.ts.timeIntervalSince(a.ts) < 600
     }
+}
 
-    private func composer(addr: String, sim: Int?, showSim: Bool) -> some View {
+/// The text field and Send. Its own view, so typing redraws only this, not the whole conversation.
+private struct Composer: View {
+    @Environment(Store.self) private var store
+    @Environment(\.central) private var central
+    var addr: String
+    var sim: Int?
+    var showSim: Bool
+    @State private var draft = ""
+
+    var body: some View {
         let live = store.peer != nil // while out of reach, texts wait in the outbox
         let away: Bool = { if case .outOfReach = store.link { return true }; return false }()
         let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -175,7 +183,7 @@ struct ConversationView: View {
             if showSim, let sim { return String(localized: "Text from SIM \(Fmt.digits(String(sim)))") }
             return String(localized: "Text")
         }()
-        return HStack(spacing: 8) {
+        HStack(spacing: 8) {
             TextField(placeholder, text: $draft, axis: .vertical)
                 .font(.app(Font.isPersian ? 16 : 17)).lineLimit(1...5)
                 .padding(.horizontal, 14).padding(.vertical, 7)

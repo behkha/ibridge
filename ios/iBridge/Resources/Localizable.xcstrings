@@ -311,16 +311,6 @@
         }
       }
     },
-    "New text": {
-      "localizations": {
-        "fa": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "پیام تازه"
-          }
-        }
-      }
-    },
     "Cancel": {
       "localizations": {
         "fa": {
@@ -347,16 +337,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "گوشی"
-          }
-        }
-      }
-    },
-    "Battery": {
-      "localizations": {
-        "fa": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "باتری"
           }
         }
       }
@@ -417,16 +397,6 @@
           "stringUnit": {
             "state": "translated",
             "value": "این آیفون تا جفت کردن دوباره پیام و تماسی نمی‌گیرد."
-          }
-        }
-      }
-    },
-    "Pair with Android": {
-      "localizations": {
-        "fa": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "جفت کردن با اندروید"
           }
         }
       }

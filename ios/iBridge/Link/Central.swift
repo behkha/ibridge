@@ -23,6 +23,10 @@ final class Central: NSObject {
     private var pairingStarted = Date.distantPast
     /// Peripherals that answered NOT_PAIRED: someone else's iBridge. Ignored for 15 minutes.
     private var ignored: [UUID: Date] = [:]
+    /// The Android phone the user unlinked while it was out of reach: kept only to tell it `unpair` at the next link.
+    private var retired: PairedPeer? {
+        didSet { if let retired, let d = try? JSONEncoder().encode(retired) { Keychain.write("ibridge-retired", d) } else { Keychain.delete("ibridge-retired") } }
+    }
     private var lastKnown: UUID? {
         get { UserDefaults.standard.string(forKey: "peripheral").flatMap(UUID.init) }
         set { UserDefaults.standard.set(newValue?.uuidString, forKey: "peripheral") }
@@ -38,6 +42,7 @@ final class Central: NSObject {
     init(store: Store) {
         self.store = store
         super.init()
+        retired = Keychain.read("ibridge-retired").flatMap { try? JSONDecoder().decode(PairedPeer.self, from: $0) }
         manager = CBCentralManager(delegate: self, queue: .main, options: [CBCentralManagerOptionRestoreIdentifierKey: "app.ibridge.central"])
         // Never sit idle while not linked, and never trust a "linked" state Android no longer shares.
         watchdog = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
@@ -67,7 +72,8 @@ final class Central: NSObject {
     }
 
     func unpair() {
-        send(["t": "unpair"])
+        // Out of reach, Android would wait for this iPhone forever: keep its key only to deliver `unpair` later.
+        if !send(["t": "unpair"]), let p = store.peer { retired = p }
         lastKnown = nil
         store.unpair()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.disconnect() }
@@ -133,7 +139,7 @@ final class Central: NSObject {
     /// Keeps a scan and a pending connect running while not linked. With `probe`, pings a link that looks live:
     /// a restarted Android can leave the radio link up with no session behind it.
     private func checkLink(probe: Bool = false) {
-        guard manager.state == .poweredOn, store.peer != nil || pairing != nil else { return }
+        guard manager.state == .poweredOn, store.peer != nil || pairing != nil || retired != nil else { return }
         if let sent = pingSentAt, Date().timeIntervalSince(sent) > 5 {
             log.notice("no pong in 5 s; dropping a dead link")
             pingSentAt = nil
@@ -158,7 +164,7 @@ final class Central: NSObject {
 
     private func connectOrScan() {
         guard manager.state == .poweredOn, peripheral == nil else { return }
-        if pairing == nil, store.peer == nil { return }
+        if pairing == nil, store.peer == nil, retired == nil { return }
         if pairing == nil, let id = lastKnown, !isIgnored(id), let p = manager.retrievePeripherals(withIdentifiers: [id]).first {
             log.notice("pending connect to last known \(id.uuidString.prefix(8), privacy: .public)")
             connect(p) // pending connects never time out on iOS
@@ -229,6 +235,7 @@ final class Central: NSObject {
             let events: [Handshake.Event]
             if let start = pairing { events = try h.startPairing(start) }
             else if let peer = store.peer { events = h.startSession(peer: peer) }
+            else if let r = retired { events = h.startSession(peer: r) }
             else { disconnect(); return }
             handle(events)
         } catch { fail(error) }
@@ -240,10 +247,16 @@ final class Central: NSObject {
             case .send(let p): queue(p)
             case .paired(let peer):
                 pairing = nil
+                retired = nil // a new pairing replaces the old one on Android anyway
                 PeerStore.save(peer)
                 store.adopt(peer)
                 lastKnown = peripheral?.identifier
                 log.notice("paired with \(peer.name, privacy: .public)")
+            case .live where store.peer == nil && retired != nil:
+                log.notice("live with the unlinked phone: telling it unpair")
+                send(["t": "unpair"])
+                retired = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.disconnect(); self?.manager.stopScan() }
             case .live:
                 log.notice("live")
                 retryDelay = 1
@@ -259,6 +272,8 @@ final class Central: NSObject {
                 }
                 if store.contacts.isEmpty { refreshContacts() }
                 flush()
+            case .message where store.peer == nil && pairing == nil:
+                break // the unlinked phone's catch-up while `unpair` is on its way: none of it is kept
             case .message(let m) where m.str("t") == "pong":
                 pingSentAt = nil
             case .message(let m):
@@ -283,6 +298,7 @@ final class Central: NSObject {
             switch e {
             case .notPaired where pairing == nil:
                 if let id { ignored[id] = Date() }
+                if store.peer == nil { retired = nil } // Android already forgot this iPhone
                 // Our own Android no longer knows this iPhone: it was unlinked or reinstalled there.
                 if id != nil, id == lastKnown {
                     lastKnown = nil

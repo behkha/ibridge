@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -16,11 +18,25 @@ android {
         versionName = "0.1.0"
     }
 
+    // Release key outside the repo (~/.ibridge/signing.properties; backup in ~/Documents/iBridge-signing-backup).
+    // Where it is missing (CI), the release build falls back to the debug key.
+    val signing = Properties().apply {
+        val f = file(System.getProperty("user.home") + "/.ibridge/signing.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    signingConfigs {
+        if (signing.isNotEmpty()) create("release") {
+            storeFile = file(signing.getProperty("storeFile"))
+            storePassword = signing.getProperty("storePassword")
+            keyAlias = signing.getProperty("keyAlias")
+            keyPassword = signing.getProperty("keyPassword")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            // Sideloaded build: signed with the debug key until a release key exists.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {

@@ -64,7 +64,7 @@ class BridgeService : Service() {
         Link.init(this)
         phone = Phone(this)
         startInForeground()
-        gatt = Gatt(this, ::engineFor) { Link.setConnected(false) }
+        gatt = Gatt(this, ::engineFor) { Link.setConnected(false); keepRecent() }
         gatt.start()
         registerObservers()
         registerReceiver(stateReceiver, IntentFilter().apply {
@@ -143,7 +143,7 @@ class BridgeService : Service() {
     private fun onMessage(m: JSONObject) {
         Log.i(TAG, "← ${m.optString("t")} ${m.optString("kind", m.optString("call"))}")
         when (m.optString("t")) {
-            "hello" -> { sendStatus(force = true); catchUp() }
+            "hello" -> { keepRecent(); sendStatus(force = true); catchUp() }
             "read" -> {
                 val ids = m.optJSONArray("ids")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).toLongOrNull() } }.orEmpty()
                 Log.i(TAG, "marked ${phone.markRead(ids)} of ${ids.size} texts read")
@@ -181,12 +181,35 @@ class BridgeService : Service() {
     private fun catchUp() {
         ringMsg?.let { push(it) }
         val state = awayIds("state")
-        if (state.isNotEmpty() && phone.smsByIds(state).all { push(JSONObject(it.toString()).put("t", "sms")) }) clearAway("state")
-        for ((key, type) in listOf("read" to "sms.read", "gone" to "sms.gone")) {
+        if (state.isNotEmpty() && phone.smsByIds(state).all { push(JSONObject(it.toString()).put("t", "sms")) }) { clearAway("state"); remember("state", state) }
+        for ((key, type) in AWAY_IDS) {
             val ids = awayIds(key)
-            if (ids.isNotEmpty() && pushIds(type, ids)) clearAway(key)
+            if (ids.isNotEmpty() && pushIds(type, ids)) { clearAway(key); remember(key, ids) }
         }
-        if (away.getBoolean("contacts", false) && push(JSONObject().put("t", "contacts.changed"))) away.edit().putBoolean("contacts", false).apply()
+        if (away.getBoolean("contacts", false) && push(JSONObject().put("t", "contacts.changed"))) {
+            away.edit().putBoolean("contacts", false).apply()
+            remember("contacts", emptyList())
+        }
+    }
+
+    /**
+     * Changes pushed in the last 15 s. `push` only queues: when the link drops (or the iPhone starts over on the
+     * same link) these may never have arrived, so they are kept for the next catch-up. All of them are idempotent.
+     */
+    private val recent = ArrayDeque<Triple<Long, String, Collection<Long>>>()
+
+    private fun remember(key: String, ids: Collection<Long>) {
+        val now = System.currentTimeMillis()
+        while (recent.isNotEmpty() && now - recent.first().first > 15_000) recent.removeFirst()
+        recent.addLast(Triple(now, key, ids))
+    }
+
+    private fun keepRecent() {
+        val now = System.currentTimeMillis()
+        recent.filter { now - it.first <= 15_000 }.forEach { (_, key, ids) ->
+            if (key == "contacts") { if (Link.peer != null) away.edit().putBoolean("contacts", true).apply() } else keepAway(key, ids)
+        }
+        recent.clear()
     }
 
     private fun awayIds(key: String): List<Long> = away.getStringSet(key, emptySet())!!.mapNotNull { it.toLongOrNull() }
@@ -301,9 +324,13 @@ class BridgeService : Service() {
         val read = now.filter { (id, v) -> before[id]?.let { it and 1 == 0 && v and 1 == 1 } == true }.keys
         val gone = before.keys.filter { it !in now }
         phone.smsByIds(added).forEach(::pushNewSms)
-        keepAway("state", phone.smsByIds(restated).filterNot { push(JSONObject(it.toString()).put("t", "sms")) }.map { it.getString("id").toLong() })
-        if (!pushIds("sms.read", read)) keepAway("read", read)
-        if (!pushIds("sms.gone", gone)) keepAway("gone", gone)
+        val (pushed, missed) = phone.smsByIds(restated).partition { push(JSONObject(it.toString()).put("t", "sms")) }
+        keepAway("state", missed.map { it.getString("id").toLong() })
+        remember("state", pushed.map { it.getString("id").toLong() })
+        for ((key, ids) in listOf("read" to read, "gone" to gone)) {
+            if (ids.isEmpty()) continue
+            if (pushIds(if (key == "read") "sms.read" else "sms.gone", ids)) remember(key, ids) else keepAway(key, ids)
+        }
     }
 
     private fun pushNewSms(item: JSONObject) {
@@ -320,12 +347,19 @@ class BridgeService : Service() {
         }
     }
 
+    /** Every call-log id at the last look, to find deleted rows. */
+    private var callIds: HashSet<Long>? = null
+
     private val callObserver = object : ContentObserver(observerHandler) {
         override fun onChange(selfChange: Boolean) = gatt.post {
             phone.callsAfter(lastCallId, 0, 50).forEach { item ->
                 lastCallId = maxOf(lastCallId, item.getString("id").toLong())
                 if (push(JSONObject(item.toString()).put("t", "call"))) Link.countSent(call = true)
             }
+            val now = phone.callIds() ?: return@post // the read failed: look again on the next change
+            val gone = callIds?.filter { it !in now }.orEmpty()
+            callIds = now
+            if (gone.isNotEmpty()) { if (pushIds("calls.gone", gone)) remember("callsGone", gone) else keepAway("callsGone", gone) }
         }
     }
 
@@ -346,7 +380,8 @@ class BridgeService : Service() {
         if (sig == away.getInt("contacts_sig", 0)) return
         phone.forgetNames() // a number that had no name may have one now
         val sent = push(JSONObject().put("t", "contacts.changed"))
-        away.edit().putInt("contacts_sig", sig).putBoolean("contacts", !sent).apply()
+        away.edit().putInt("contacts_sig", sig).putBoolean("contacts", !sent && Link.peer != null).apply()
+        if (sent) remember("contacts", emptyList())
     }
 
     private var smsWatched = false
@@ -362,6 +397,7 @@ class BridgeService : Service() {
         }
         if (!callsWatched && phone.has(Manifest.permission.READ_CALL_LOG)) {
             lastCallId = phone.latestCallId()
+            callIds = phone.callIds()
             contentResolver.registerContentObserver(CallLog.Calls.CONTENT_URI, true, callObserver)
             callsWatched = true
         }
@@ -413,6 +449,8 @@ class BridgeService : Service() {
         const val CHANNEL = "link"
         const val ACTION_UNLINK = "app.ibridge.UNLINK"
         const val PAGE_BYTES = 40_000
+        /** Away keys sent as id lists after `hello`, and their message types. */
+        val AWAY_IDS = listOf("read" to "sms.read", "gone" to "sms.gone", "callsGone" to "calls.gone")
 
         /** The name the user sees in Settings ("Galaxy S21 Ultra"), not the model code ("SM-G998B"). */
         fun deviceName(context: Context): String =

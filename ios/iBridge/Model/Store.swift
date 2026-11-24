@@ -123,6 +123,10 @@ final class Store {
             }
         case "call":
             if let c = Call(m) { addCall(c); advance("calls", to: c.id) }
+        case "calls.gone":
+            let ids = m["ids"] as? [String] ?? []
+            ids.forEach { calls[$0] = nil }
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids.map { "missed-\($0)" })
         case "call.ring":
             if let id = m.str("call"), let addr = m.str("addr") {
                 ringing = (id, addr, m.str("name"))
