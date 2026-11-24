@@ -22,6 +22,9 @@ enum Palette {
     static let tabBg = Color(hex: 0xF9FAFB)
     static let disabled = Color(hex: 0xB4BAC4)
     static let numberTint = Color(hex: 0x8A93A3)
+    static let camera = Color(hex: 0x1B2330)
+    static let scanned = Color(hex: 0x3DDC97)
+    static let groupedBg = Color(hex: 0xF2F3F6)
     static let tints: [Color] = [0x5E6AD2, 0xC2569B, 0x2E8C83, 0xB0702A, 0x6A7B2E].map { Color(hex: $0) }
 }
 
@@ -70,6 +73,31 @@ enum Fmt {
 
     static func time(_ d: Date) -> String { clock.string(from: d) }
 
+    /// Day separator in a conversation: "Today", "Yesterday", a weekday this week, else a date.
+    static func day(_ d: Date) -> String {
+        let cal = Calendar.current
+        if cal.isDateInToday(d) { return String(localized: "Today") }
+        if cal.isDateInYesterday(d) { return String(localized: "Yesterday") }
+        if let days = cal.dateComponents([.day], from: d, to: Date()).day, days < 7 { return d.formatted(.dateTime.weekday(.wide)) }
+        return d.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    /// "0912 111 0001" for an Iranian mobile typed locally, else the number as stored. Locale digits.
+    static func phone(_ n: String) -> String {
+        let d = n.filter(\.isNumber)
+        if n.allSatisfy({ $0.isNumber }), d.hasPrefix("09"), d.count > 4 {
+            var parts = [String(d.prefix(4))]
+            let rest = d.dropFirst(4)
+            if !rest.isEmpty { parts.append(String(rest.prefix(3))) }
+            if rest.count > 3 { parts.append(String(rest.dropFirst(3))) }
+            return digits(parts.joined(separator: " "))
+        }
+        if n.hasPrefix("+98"), n.dropFirst().allSatisfy(\.isNumber), d.count == 12 { // +98 912 111 0001
+            return digits("+98 \(d.dropFirst(2).prefix(3)) \(d.dropFirst(5).prefix(3)) \(d.dropFirst(8))")
+        }
+        return digits(n)
+    }
+
     /// Locale digits (Persian digits in Persian).
     static func digits(_ s: String) -> String {
         guard Font.isPersian else { return s }
@@ -81,6 +109,9 @@ enum Fmt {
         guard c.count == 6 else { return digits(c) }
         return digits(String(c.prefix(3)) + " " + String(c.suffix(3)))
     }
+
+    /// A name inside other-direction text (a Latin phone name in Persian): first-strong isolate.
+    static func isolate(_ s: String) -> String { "\u{2068}\(s)\u{2069}" }
 
     static func initials(_ title: String) -> String {
         let words = title.split(separator: " ").filter { !$0.isEmpty }

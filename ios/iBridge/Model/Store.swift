@@ -53,6 +53,13 @@ final class Store {
         return c
     }
 
+    /// The thread a number already has, matched on its last 9 digits like contact names.
+    func threadID(for addr: String) -> String? {
+        let digits = addr.filter(\.isNumber).suffix(9)
+        guard digits.count >= 6 else { return messages.values.first { $0.addr == addr }?.thread }
+        return messages.values.filter { $0.addr.filter(\.isNumber).hasSuffix(digits) }.max { $0.ts < $1.ts }?.thread
+    }
+
     func contactName(for addr: String) -> String? {
         let digits = addr.filter(\.isNumber).suffix(9)
         guard digits.count >= 6 else { return nil }

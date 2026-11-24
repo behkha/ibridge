@@ -34,6 +34,8 @@ struct RootView: View {
     }
 
     static func styleTabBar() {
+        // iOS 26+: the system's Liquid Glass tab bar (approved "system glass only"); a custom appearance would make it opaque.
+        if #available(iOS 26, *) { return }
         let a = UITabBarAppearance()
         a.configureWithOpaqueBackground()
         a.backgroundColor = UIColor(Palette.tabBg)

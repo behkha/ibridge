@@ -560,6 +560,176 @@
           }
         }
       }
+    },
+    "Scan the code on your Android phone": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "کد روی گوشی اندرویدتان را اسکن کنید"
+          }
+        }
+      }
+    },
+    "Type the code under the QR": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "کد زیر QR را تایپ کنید"
+          }
+        }
+      }
+    },
+    "Linking to your Android phone": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "در حال اتصال به گوشی اندروید"
+          }
+        }
+      }
+    },
+    "Linking to %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "در حال اتصال به %@"
+          }
+        }
+      }
+    },
+    "Keep both phones close.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "دو گوشی را نزدیک هم نگه دارید."
+          }
+        }
+      }
+    },
+    "Pairing code, 6 characters": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "کد جفت کردن، ۶ نویسه"
+          }
+        }
+      }
+    },
+    "Today": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "امروز"
+          }
+        }
+      }
+    },
+    "Sends when %@ is back": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "وقتی %@ برگردد ارسال می‌شود"
+          }
+        }
+      }
+    },
+    "Text from SIM %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "پیام از سیم %@"
+          }
+        }
+      }
+    },
+    "Not sent. Tap to retry": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ارسال نشد. برای تلاش دوباره بزنید"
+          }
+        }
+      }
+    },
+    "Opens the conversation": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "گفتگو را باز می‌کند"
+          }
+        }
+      }
+    },
+    "Linked to %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "متصل به %@"
+          }
+        }
+      }
+    },
+    "%@ is out of reach": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "%@ دور از دسترس است"
+          }
+        }
+      }
+    },
+    "Since %@. Texts arrive when it’s back.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "از %@. پیام‌ها وقتی برگردد می‌رسند."
+          }
+        }
+      }
+    },
+    "Encrypted.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "رمزنگاری‌شده."
+          }
+        }
+      }
+    },
+    "Encrypted. Last text %@.": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "رمزنگاری‌شده. آخرین پیام %@."
+          }
+        }
+      }
+    },
+    "battery": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "باتری"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

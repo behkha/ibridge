@@ -250,7 +250,10 @@ class BridgeService : Service() {
                 val id = item.getString("id").toLong()
                 lastSmsId = maxOf(lastSmsId, id)
                 if (item.getString("state") == "pending") pendingSms += id
-                if (!push(JSONObject(item.toString()).put("t", "sms"))) return@forEach
+                if (!push(JSONObject(item.toString()).put("t", "sms"))) {
+                    if (Link.peer != null && item.optString("dir") == "in") Link.countWaiting()
+                    return@forEach
+                }
                 Link.countSent(text = true)
                 item.optString("code").takeIf { it.isNotEmpty() }?.let { code ->
                     push(

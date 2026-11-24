@@ -57,6 +57,11 @@
     <string name="home_linked">Linked to %1$s</string>
     <string name="home_waiting">Waiting for %1$s</string>
     <string name="home_encrypted">Encrypted.</string>
+    <string name="home_away_since">Away since %1$s.</string>
+    <plurals name="home_waiting_texts">
+        <item quantity="one">%1$d text will follow when it’s back.</item>
+        <item quantity="other">%1$d texts will follow when it’s back.</item>
+    </plurals>
     <string name="home_last_sent">Encrypted. Last message sent %1$s.</string>
     <string name="stat_texts">texts today</string>
     <string name="stat_calls">calls today</string>

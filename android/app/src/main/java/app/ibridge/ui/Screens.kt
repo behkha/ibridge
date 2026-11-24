@@ -41,7 +41,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -216,10 +218,20 @@ fun HomeScreen(
                     stringResource(if (linked) R.string.home_linked else R.string.home_waiting, peerName),
                     fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium, color = cardInk,
                 )
-                val detail = if (ui.lastSentAt > 0)
-                    stringResource(R.string.home_last_sent, DateUtils.getRelativeTimeSpanString(ui.lastSentAt).toString().replaceFirstChar { it.lowercase() })
-                else stringResource(R.string.home_encrypted)
-                Text(detail, fontSize = 15.sp, lineHeight = 22.sp, color = cardInk)
+                val ctx = LocalContext.current
+                val detail = when {
+                    // W1 Quiet: since when, and what follows when the iPhone is back.
+                    !linked && ui.awaySince > 0 -> {
+                        val flags = if (DateUtils.isToday(ui.awaySince)) DateUtils.FORMAT_SHOW_TIME
+                        else DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH or DateUtils.FORMAT_SHOW_TIME
+                        val since = stringResource(R.string.home_away_since, DateUtils.formatDateTime(ctx, ui.awaySince, flags))
+                        if (ui.waiting > 0) since + " " + pluralStringResource(R.plurals.home_waiting_texts, ui.waiting, ui.waiting) else since
+                    }
+                    ui.lastSentAt > 0 ->
+                        stringResource(R.string.home_last_sent, DateUtils.getRelativeTimeSpanString(ui.lastSentAt).toString().replaceFirstChar { it.lowercase() })
+                    else -> stringResource(R.string.home_encrypted)
+                }
+                Text(detail, fontSize = 15.sp, lineHeight = 22.sp, color = if (linked) cardInk else C.body)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val signal = when (ui.signal) {

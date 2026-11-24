@@ -43,7 +43,9 @@ enum Demo {
             if !name.isEmpty { _ = store.tint(for: addr) }
             for i in 0..<max(unread, 1) {
                 n += 1
-                store.messages["\(n)"] = SMS(id: "\(n)", thread: addr, addr: addr, name: name.isEmpty ? nil : name, body: body,
+                // Sara's second unread text is a different one (the conversation screen shows both).
+                let text = i == 1 && addr == "+989121110001" ? (fa ? "زنگ خراب است" : "Buzzer doesn’t work") : body
+                store.messages["\(n)"] = SMS(id: "\(n)", thread: addr, addr: addr, name: name.isEmpty ? nil : name, body: text,
                                              ts: ts.addingTimeInterval(Double(-i)), dir: "in", read: unread == 0, sim: 2, state: "ok")
             }
         }
@@ -78,7 +80,7 @@ enum Demo {
         for (dir, ts, body) in sara {
             n += 1
             store.messages["\(n)"] = SMS(id: "\(n)", thread: "+989121110001", addr: "+989121110001", name: fa ? "سارا احمدی" : "Sara Ahmadi",
-                                         body: body, ts: ts, dir: dir, read: true, sim: 2, state: "ok")
+                                         body: body, ts: ts, dir: dir, read: true, sim: 2, state: ts == today(14, 1) ? "failed" : "ok")
         }
 
         store.contacts = (fa ? [

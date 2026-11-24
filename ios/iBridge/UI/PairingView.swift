@@ -1,56 +1,197 @@
 import AVFoundation
 import SwiftUI
 
-/// Scan the Android pairing QR, or type its fallback code. No approved mockup yet: stock layout in the A Companion palette.
+/// Approved P1 "Viewfinder" (canvas page Screens round 2): the camera fills the screen, typing the code is one tap away.
 struct PairingView: View {
     @Environment(Store.self) private var store
     @Environment(\.central) private var central
     @Environment(\.dismiss) private var dismiss
     @State private var typing = Demo.scenario()?.name == "pairing-code"
     @State private var code = ""
-    @State private var waiting = false
+    /// Who we are linking to while the handshake runs (the QR carries the Android phone's name).
+    @State private var linking: String?
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 20) {
-                if typing {
-                    TextField("K7Q 29M", text: $code)
-                        .font(.app(28, .bold)).tracking(2).multilineTextAlignment(.center)
-                        .textInputAutocapitalization(.characters).autocorrectionDisabled()
-                        .environment(\.layoutDirection, .leftToRight)
-                        .padding(.vertical, 14)
-                        .background(Palette.field, in: RoundedRectangle(cornerRadius: 14))
-                    Button {
-                        if let c = PairingStart.normalizeCode(code) { waiting = true; central?.pair(.code(c)) }
-                    } label: {
-                        Text("Pair").font(.app(17, .semibold)).foregroundStyle(.white)
-                            .frame(maxWidth: .infinity).frame(height: 52).background(Palette.accent, in: Capsule())
-                    }
-                    .disabled(PairingStart.normalizeCode(code) == nil || waiting)
-                } else {
-                    QRScanner { text in
-                        guard !waiting, let start = PairingStart.parse(text) else { return }
-                        waiting = true
-                        central?.pair(start)
-                    }
-                    .frame(maxWidth: .infinity).aspectRatio(1, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                }
-                if let err = store.pairingError {
-                    Text(err).font(.app(15)).foregroundStyle(Palette.awayInk)
-                } else if waiting {
-                    HStack(spacing: 8) { ProgressView(); Text("Linking").font(.app(15)).foregroundStyle(Palette.caption) }
-                }
-                Button(typing ? "Scan instead" : "Type code instead") { typing.toggle(); store.pairingError = nil; waiting = false }
-                    .font(.app(16, .medium)).foregroundStyle(Palette.accent)
-                Spacer()
-            }
-            .padding(24)
-            .navigationTitle("Pair with Android")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cancel") { central?.cancelPairing(); dismiss() } } }
-            .onChange(of: store.pairingError) { if store.pairingError != nil { waiting = false } }
-            .onChange(of: store.link) { if store.link == .linked { dismiss() } }
+        Group {
+            if typing { codeEntry } else { viewfinder }
         }
+        .onChange(of: store.pairingError) { if store.pairingError != nil { linking = nil } }
+        .onChange(of: store.link) { if store.link == .linked { dismiss() } }
+    }
+
+    private func cancel() { central?.cancelPairing(); dismiss() }
+
+    private func switchMode() { typing.toggle(); store.pairingError = nil; linking = nil; code = "" }
+
+    // MARK: camera
+
+    private var viewfinder: some View {
+        ZStack {
+            Palette.camera.ignoresSafeArea()
+            QRScanner { text in
+                guard linking == nil, let start = PairingStart.parse(text), case .qr(_, _, let name) = start else { return }
+                store.pairingError = nil
+                linking = name
+                central?.pair(start)
+            }
+            .ignoresSafeArea()
+            Color.black.opacity(0.45).ignoresSafeArea().allowsHitTesting(false)
+            VStack(spacing: 0) {
+                HStack {
+                    Button("Cancel", action: cancel)
+                        .font(.app(17)).foregroundStyle(.white).frame(height: 44)
+                    Spacer()
+                }
+                Text("Scan the code on your Android phone")
+                    .font(.app(28, .bold)).foregroundStyle(.white).multilineTextAlignment(.center)
+                    .padding(.top, 24).padding(.horizontal, 8)
+                Spacer(minLength: 24)
+                Reticle(color: linking == nil ? .white : Palette.scanned).frame(width: 250, height: 250)
+                Spacer(minLength: 24)
+                if let card = statusCard {
+                    card
+                } else {
+                    Button(action: switchMode) {
+                        Text("Type code instead").font(.app(17, .semibold)).foregroundStyle(.white)
+                            .padding(.horizontal, 24).frame(height: 50)
+                            .background(.white.opacity(0.18), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 24)
+        }
+        .environment(\.colorScheme, .dark)
+    }
+
+    // MARK: typed code
+
+    private var codeEntry: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("Cancel", action: cancel)
+                Spacer()
+                Button("Scan instead", action: switchMode)
+            }
+            .font(.app(17)).foregroundStyle(Palette.accent).frame(height: 44)
+            VStack(spacing: 28) {
+                Text("Type the code under the QR")
+                    .font(.app(28, .bold)).foregroundStyle(Palette.ink).multilineTextAlignment(.center)
+                CodeBoxes(code: $code)
+                Button {
+                    guard let c = PairingStart.normalizeCode(code) else { return }
+                    store.pairingError = nil
+                    linking = ""
+                    central?.pair(.code(c))
+                } label: {
+                    Text("Pair").font(.app(17, .semibold)).foregroundStyle(.white)
+                        .frame(maxWidth: .infinity).frame(height: 52).background(Palette.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(PairingStart.normalizeCode(code) == nil || linking != nil)
+                .opacity(PairingStart.normalizeCode(code) == nil || linking != nil ? 0.4 : 1)
+                if let card = statusCard { card }
+            }
+            .padding(.horizontal, 8).padding(.top, 24)
+            Spacer()
+        }
+        .padding(.horizontal, 16).padding(.top, 6)
+        .background(Color.white)
+    }
+
+    // MARK: linking / error
+
+    private var statusCard: StatusCard? {
+        if let err = store.pairingError {
+            // The error strings are "What happened. What to do." The first sentence is the title.
+            let parts = err.split(separator: ".", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            return StatusCard(kind: .problem, title: parts[0], detail: parts.count > 1 ? parts[1] : nil)
+        }
+        guard let name = linking else { return nil }
+        let title = name.isEmpty ? String(localized: "Linking to your Android phone") : String(localized: "Linking to \(name)")
+        return StatusCard(kind: .working, title: title, detail: String(localized: "Keep both phones close."))
+    }
+}
+
+/// Six boxes, 3 + 3, over one hidden text field. The code reads left to right in every language.
+private struct CodeBoxes: View {
+    @Binding var code: String
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let chars = Array(code)
+        HStack(spacing: 6) {
+            ForEach(0..<6, id: \.self) { i in
+                Text(i < chars.count ? String(chars[i]) : "")
+                    .font(.app(28, .bold)).foregroundStyle(Palette.ink)
+                    .frame(width: 44, height: 56)
+                    .background(Palette.field, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(i == min(chars.count, 5) && focused ? Palette.accent : .clear, lineWidth: 2))
+                if i == 2 { Spacer().frame(width: 12) }
+            }
+        }
+        .environment(\.layoutDirection, .leftToRight)
+        .background {
+            TextField("", text: $code)
+                .textInputAutocapitalization(.characters).autocorrectionDisabled().keyboardType(.asciiCapable)
+                .focused($focused).opacity(0.02)
+                .onChange(of: code) {
+                    let clean = String(code.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(6))
+                    if clean != code { code = clean }
+                }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { focused = true }
+        .onAppear { focused = true }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Pairing code, 6 characters")
+        .accessibilityValue(code)
+    }
+}
+
+/// Linking (green, spinner) or a problem (orange), on the camera or under the code boxes.
+struct StatusCard: View {
+    enum Kind { case working, problem }
+    var kind: Kind
+    var title: String
+    var detail: String?
+
+    var body: some View {
+        let ink = kind == .working ? Palette.linkedInk : Palette.awayInk
+        HStack(spacing: 12) {
+            if kind == .working {
+                ProgressView().tint(ink)
+            } else {
+                Image(systemName: "exclamationmark.triangle").font(.system(size: 20, weight: .semibold)).foregroundStyle(Palette.away)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.app(17, .semibold))
+                if let detail { Text(detail).font(.app(15)) }
+            }
+            .foregroundStyle(ink)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 14)
+        .background(kind == .working ? Palette.linkedBg : Palette.awayBg, in: RoundedRectangle(cornerRadius: 16))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// Four corner brackets.
+private struct Reticle: View {
+    var color: Color
+
+    var body: some View {
+        Canvas { ctx, size in
+            let l: CGFloat = 34, w = size.width, h = size.height, i: CGFloat = 2
+            var p = Path()
+            p.move(to: .init(x: i, y: l)); p.addLine(to: .init(x: i, y: i)); p.addLine(to: .init(x: l, y: i))
+            p.move(to: .init(x: w - l, y: i)); p.addLine(to: .init(x: w - i, y: i)); p.addLine(to: .init(x: w - i, y: l))
+            p.move(to: .init(x: w - i, y: h - l)); p.addLine(to: .init(x: w - i, y: h - i)); p.addLine(to: .init(x: w - l, y: h - i))
+            p.move(to: .init(x: l, y: h - i)); p.addLine(to: .init(x: i, y: h - i)); p.addLine(to: .init(x: i, y: h - l))
+            ctx.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -62,16 +203,9 @@ struct QRScanner: UIViewRepresentable {
 
     func makeUIView(context: Context) -> PreviewView {
         let v = PreviewView()
-        v.backgroundColor = UIColor(Palette.ink)
-        guard let device = AVCaptureDevice.default(for: .video), let input = try? AVCaptureDeviceInput(device: device) else {
-            let label = UILabel()
-            label.text = String(localized: "No camera")
-            label.textColor = .white
-            label.translatesAutoresizingMaskIntoConstraints = false
-            v.addSubview(label)
-            NSLayoutConstraint.activate([label.centerXAnchor.constraint(equalTo: v.centerXAnchor), label.centerYAnchor.constraint(equalTo: v.centerYAnchor)])
-            return v
-        }
+        v.backgroundColor = .clear
+        // No camera (the Simulator) or no permission: the dark surface behind stays, "Type code instead" still works.
+        guard let device = AVCaptureDevice.default(for: .video), let input = try? AVCaptureDeviceInput(device: device) else { return v }
         let session = AVCaptureSession()
         session.addInput(input)
         let output = AVCaptureMetadataOutput()

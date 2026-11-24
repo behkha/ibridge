@@ -16,6 +16,10 @@ data class LinkUi(
     val textsToday: Int = 0,
     val callsToday: Int = 0,
     val signal: Int = -1,
+    /** When the iPhone was last seen (0 = linked now, or not known). */
+    val awaySince: Long = 0,
+    /** Texts that could not be pushed while away; the iPhone fetches them when it is back. */
+    val waiting: Int = 0,
 )
 
 object Link {
@@ -35,6 +39,8 @@ object Link {
             lastSentAt = prefs.getLong("last_sent", 0),
             textsToday = if (today) prefs.getInt("texts", 0) else 0,
             callsToday = if (today) prefs.getInt("calls", 0) else 0,
+            awaySince = prefs.getLong("away_since", 0),
+            waiting = prefs.getInt("waiting", 0),
         )
     }
 
@@ -48,7 +54,24 @@ object Link {
         _ui.update { it.copy(peer = peer, connected = if (peer == null) false else it.connected) }
     }
 
-    fun setConnected(connected: Boolean) = _ui.update { it.copy(connected = connected) }
+    fun setConnected(connected: Boolean) {
+        val now = System.currentTimeMillis()
+        _ui.update {
+            when {
+                connected -> it.copy(connected = true, awaySince = 0, waiting = 0)
+                it.connected || it.awaySince == 0L -> it.copy(connected = false, awaySince = now)
+                else -> it.copy(connected = false) // already away: keep the first time
+            }
+        }
+        val s = _ui.value
+        prefs.edit().putLong("away_since", s.awaySince).putInt("waiting", s.waiting).apply()
+    }
+
+    /** A text arrived while the iPhone was away. */
+    fun countWaiting() {
+        _ui.update { it.copy(waiting = it.waiting + 1) }
+        prefs.edit().putInt("waiting", _ui.value.waiting).apply()
+    }
 
     fun setSignal(level: Int) = _ui.update { it.copy(signal = level) }
 
