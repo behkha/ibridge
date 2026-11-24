@@ -29,10 +29,9 @@ Goal: our own iTell. Android holds the SIM; texts, contacts, calls and call aler
 - Phase-1 incoming call on iPhone = a notification (decline / text back), not CallKit, since there is no audio yet.
 - No unit tests (user rule). Verify by building and running on real devices/emulator/simulator.
 ## Next (user, 2026-11-24: focus on app logic; polish and redesign later)
-1. Logic audit done 2026-11-24 (PROTOCOL §6 "While the link is down", "Read state"); verified on both phones except the missed-call alert (needs a call from another phone). Ratings: side-session notes logic-audit.md.
-   - New: iPhone outbox (send while away, read marks), read both ways (`read`, `sms.read`), `sms.gone`, `contacts.changed`, ring re-sent on relink, missed-call alert from the call log.
-   - Galaxy: WRITE_SMS app-op set to allow (user OK) so iPhone reads mark Android texts read. Default SMS app there is Google Messages; its bin keeps deleted texts until emptied.
-   - Left (rated < 5): unlink on iPhone while away leaves Android waiting; call-log deletions not mirrored; changes lost if the link drops mid-push.
-2. Later polish: unused Persian keys; per-keystroke recompute in conversation. Real-data screenshots stay out of the (public) repo.
+1. Phase 1 finished 2026-11-24 (MMS and a long real-world run skipped by the user). Verified on both phones: read both ways, send while away, catch-up + away card, deletes (`sms.gone`, `calls.gone`), contacts changes, ring re-sent on relink, missed-call alert, unlink while away delivered later.
+   - Galaxy runs the release-signed APK (key ~/.ibridge, backup ~/Documents/iBridge-signing-backup: move it off this Mac). WRITE_SMS app-op allowed there (user OK).
+   - Left: MMS/group texts; long real-world run; WRITE_SMS needs adb (phase 2's wireless-debugging route could grant it); one `BAD_PACKET bad tag` seen once mid-unlink (recovered by itself).
+2. Next: phase 2 (call audio, research/FINDINGS.md); the Galaxy is Exynos, so only the shell-privileged route applies.
 ## Open questions
 - Paid Apple account would allow TestFlight (7-day free signing is fine for now).

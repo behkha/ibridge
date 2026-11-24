@@ -22,9 +22,9 @@ Runs the app's real Kotlin `LinkEngine` (JVM, software key) against the real Swi
 
 ## 2. Android on the phone
 ```bash
-cd android && ./gradlew assembleDebug -q
+cd android && ./gradlew assembleRelease -q        # the Galaxy runs the release-signed build (key: ~/.ibridge, backup ~/Documents/iBridge-signing-backup)
 $A devices -l                                  # user's phone: Galaxy S21 Ultra (SM-G998B), Android 15, USB
-$A install -r app/build/outputs/apk/debug/app-debug.apk
+$A install -r app/build/outputs/apk/release/app-release.apk   # a debug APK won't install over it (other key)
 $A shell am start -n app.ibridge.android/app.ibridge.MainActivity
 $A shell uiautomator dump /sdcard/ui.xml && $A shell cat /sdcard/ui.xml | grep -oE 'text="[^"]+"'   # read the screen as text
 $A exec-out screencap -p > design/evidence/<name>.png
