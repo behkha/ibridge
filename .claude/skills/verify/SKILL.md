@@ -32,6 +32,8 @@ $A shell dumpsys activity services app.ibridge.android | grep isForeground   # s
 $A shell dumpsys bluetooth_manager | grep -A1 mAdvertisingServiceUuids          # advertising
 ```
 - Permission prompts are the user's to tap; ask them, never `pm grant`.
+- `NoSuchFileException …/scratchpad/gradle-…` = a Gradle daemon left by another session: `pkill -f GradleDaemon`, then build again.
+- Away card (W1): ask the user to switch the iPhone's Bluetooth off in Settings; expect `Waiting for … / Away since HH:mm.`
 - Decode the pairing QR from a screenshot: `../../android/gradlew -p tools/interop decodeQr -q --args=$PWD/design/evidence/android-pairing.png`, then `tools/interop/build/ios-side parse "<uri>"` must exit 0.
 - Compare screenshots with design/mockups/*.dc.html in a sub-agent (image analysis never runs in the lead).
 
@@ -45,7 +47,7 @@ $A shell dumpsys bluetooth_manager | grep -A1 mAdvertisingServiceUuids          
 - Who is scanning on the iPhone: `idevicesyslog | grep ScanParams` lists scan agents.
 
 ## 3. iOS (no Xcode here)
-Push to `main` of the private repo behkha/ibridge; `.github/workflows/build.yml` builds the Simulator app with XcodeGen and runs `scripts/ios-screenshots.sh` (Main, A-Calls, A-Persian via `-demo`).
+Push to `main` of the private repo behkha/ibridge; `.github/workflows/build.yml` builds the Simulator app with XcodeGen and runs `scripts/ios-screenshots.sh` (Main, A-Calls, A-Persian, Conversation(-fa), Keypad, Contacts, Settings(-fa), Pairing(-code) via `-demo`). Runner macos-26 (Xcode 26, system Liquid Glass bars); compiler errors print in the Build step.
 ```bash
 gh run watch <id> --exit-status
 gh run download <id> -n ios-screenshots -D design/evidence/ios

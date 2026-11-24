@@ -30,7 +30,7 @@ Goal: our own iTell. Android holds the SIM; texts, contacts, calls and call aler
 - Phase-1 incoming call on iPhone = a notification (decline / text back), not CallKit, since there is no audio yet.
 - No unit tests (user rule). Verify by building and running on real devices/emulator/simulator.
 ## Next
-1. Build round 2 (iOS P1/C1/K1/N2/S1 + Android W1 Quiet) → verify vs mockups (CI screenshots, phone) → fresh-eyes review.
+1. Round 2 built (iOS P1/C1/K1/N2/S1, Android W1), fresh-eyes review fixed (4 important), mockup comparison round 1 fixed; round 2 comparison pending. Not verified on the iPhone itself yet (needs a new .ipa via AltServer).
    - CI moves to runner macos-26 (Xcode 26.6, iOS 26.5 sims); deployment target stays iOS 17.
    - `-demo conversation|keypad|contacts|settings|pairing|pairing-code` screenshot these screens on CI.
 ## Open questions
