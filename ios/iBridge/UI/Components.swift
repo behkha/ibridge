@@ -182,6 +182,7 @@ struct FilledButtonStyle: ButtonStyle {
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
+            .compositingGroup() // fade the button as one layer, not the label and fill separately
             .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.4)
     }
 }

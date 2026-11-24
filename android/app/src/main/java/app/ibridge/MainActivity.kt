@@ -16,9 +16,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -55,7 +58,10 @@ class MainActivity : ComponentActivity() {
         Link.init(this)
         BridgeService.start(this)
         setContent {
-            MaterialTheme(colorScheme = lightColorScheme(primary = C.accent, background = C.bg, surface = C.bg)) { App() }
+            MaterialTheme(colorScheme = lightColorScheme(primary = C.accent, background = C.bg, surface = C.bg)) {
+                // The mockups use Roboto with no tracking; Material's body styles add 0.25–0.5sp.
+                ProvideTextStyle(LocalTextStyle.current.copy(letterSpacing = 0.sp)) { App() }
+            }
         }
     }
 

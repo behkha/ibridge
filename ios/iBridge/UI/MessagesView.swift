@@ -202,6 +202,7 @@ private struct Bubble: View {
                 .foregroundStyle(m.incoming ? Palette.ink : .white)
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(m.incoming ? Palette.field : Palette.accent, in: shape)
+                .compositingGroup()
                 .opacity(m.incoming || m.state == "ok" ? 1 : 0.55)
                 .frame(maxWidth: 292, alignment: m.incoming ? .leading : .trailing)
             if m.state == "failed" && !m.incoming {

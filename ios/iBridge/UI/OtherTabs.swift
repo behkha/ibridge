@@ -123,6 +123,7 @@ struct ContactsView: View {
                         .listRowInsets(EdgeInsets())
                         .listRowSeparatorTint(Palette.separator)
                         .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
+                        .alignmentGuide(.listRowSeparatorTrailing) { d in d.width }
                     }
                     ForEach(rows) { c in
                         Button { open(c) } label: { ContactRow(contact: c) }
@@ -195,7 +196,7 @@ struct SettingsView: View {
                     PhoneCard().padding(.horizontal, 16).padding(.top, 4)
                     group {
                         row("Pair again", color: Palette.ink, chevron: true, action: onPair)
-                        Divider().overlay(Palette.separator).padding(.leading, 16)
+                        Rectangle().fill(Palette.separator).frame(height: 1)
                         row("Unlink \(Fmt.isolate(store.peerName))", color: Palette.missed, chevron: false) { confirmUnlink = true }
                     }
                 } else {
@@ -274,7 +275,8 @@ private struct PhoneCard: View {
     private var detail: String {
         if case .outOfReach(let since) = store.link { return String(localized: "Since \(Fmt.time(since)). Texts arrive when it’s back.") }
         guard let last = store.messages.values.map(\.ts).max() else { return String(localized: "Encrypted.") }
-        return String(localized: "Encrypted. Last text \(min(last, Date()).formatted(.relative(presentation: .named))).")
+        let when = Date().timeIntervalSince(last) < 60 ? String(localized: "just now") : last.formatted(.relative(presentation: .named))
+        return String(localized: "Encrypted. Last text \(when).")
     }
 
     private func stat(_ value: String, _ label: LocalizedStringKey) -> some View {
