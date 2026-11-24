@@ -25,8 +25,9 @@ jobs:
         run: |
           xcodebuild -project ios/iBridge.xcodeproj -scheme iBridge -configuration Debug \
             -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build | tail -40
-          test -d build/Build/Products/Debug-iphonesimulator/iBridge.app
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build > sim.log 2>&1 \
+            || { grep -E "error:" sim.log | head -40; tail -30 sim.log; exit 1; }
+          test -f build/Build/Products/Debug-iphonesimulator/iBridge.app/iBridge
       - name: Screenshots
         run: scripts/ios-screenshots.sh build/Build/Products/Debug-iphonesimulator/iBridge.app screenshots
       - uses: actions/upload-artifact@v4

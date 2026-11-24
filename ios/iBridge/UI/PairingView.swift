@@ -177,7 +177,7 @@ struct StatusCard: View {
         }
     }
 
-    private var card: some View {
+    @ViewBuilder private var card: some View {
         let ink = kind == .working ? Palette.linkedInk : Palette.awayInk
         HStack(spacing: 12) {
             if kind == .working {
