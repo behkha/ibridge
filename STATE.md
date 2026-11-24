@@ -29,9 +29,14 @@ Goal: our own iTell. Android holds the SIM; texts, contacts, calls and call aler
 - iPhone: SwiftUI, iOS 17; built on GitHub Actions (no Xcode here), installed with AltServer.
 - Phase-1 incoming call on iPhone = a notification (decline / text back), not CallKit, since there is no audio yet.
 - No unit tests (user rule). Verify by building and running on real devices/emulator/simulator.
-## Next
-1. Round 2 done 2026-11-24: shipped screens match the boards after 3 comparison rounds (evidence design/evidence/round2/). Left: install the new .ipa on the iPhone 17 (AltServer) and look at it there; 'N texts will follow' line not yet seen on the Galaxy (needs a text while away).
-   - CI moves to runner macos-26 (Xcode 26.6, iOS 26.5 sims); deployment target stays iOS 17.
-   - `-demo conversation|keypad|contacts|settings|pairing|pairing-code` screenshot these screens on CI.
+## Next (user, 2026-11-24: focus on app logic; polish and redesign later)
+1. Logic audit + fixes, end to end on the real phones. Known gaps:
+   - iPhone never marks texts read: unread badges never clear, Android's read state never changes (no `read` message in PROTOCOL §6).
+   - No send while out of reach: composer locks; no queue on iPhone to send on reconnect.
+   - Read/delete on Android never reach the iPhone (sms re-pushed only on pending→ok/failed).
+   - New Android contacts only arrive on pull-to-refresh or a perms change.
+   - "N texts will follow" (Android away card) and catch-up sync after reconnect not yet seen on the phones.
+2. Polish leftovers (later): unused Persian keys in Localizable.xcstrings; per-keystroke recompute in conversation.
+   - Device evidence with real data stays out of the repo (public).
 ## Open questions
 - Paid Apple account would allow TestFlight (7-day free signing is fine for now).
