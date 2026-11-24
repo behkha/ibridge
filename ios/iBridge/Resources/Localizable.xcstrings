@@ -730,6 +730,26 @@
           }
         }
       }
+    },
+    "Missed call": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "تماس از دست رفته"
+          }
+        }
+      }
+    },
+    "Waiting for %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "در انتظار %@"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

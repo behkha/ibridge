@@ -47,6 +47,7 @@ final class Central: NSObject {
             MainActor.assumeIsolated { self?.checkLink(probe: true) }
         }
         store.onMorePages = { [weak self] kind, cursor in self?.send(["t": "sync", "kind": kind, "cursor": cursor ?? NSNull(), "limit": 200]) }
+        store.onOutbox = { [weak self] in self?.flush() }
     }
 
     // MARK: public
@@ -72,12 +73,30 @@ final class Central: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.disconnect() }
     }
 
+    /// Queues the text in the outbox; it goes now when live, or once the link is back.
+    @discardableResult
     func sendText(to: String, body: String, sim: Int? = nil) -> String {
-        let req = UUID().uuidString
-        var m: [String: Any] = ["t": "send", "req": req, "to": to, "body": body]
-        if let sim { m["sim"] = sim }
-        send(m)
-        return req
+        store.enqueue(to: to, body: body, sim: sim)
+    }
+
+    /// Sends queued texts and read marks, in order, while a session is live (PROTOCOL.md 6, "While the link is down").
+    func flush() {
+        guard store.link == .linked, let session = store.session, handshake?.isLive == true else { return }
+        for i in store.outbox.indices where store.outbox[i].session == nil && !store.outbox[i].failed {
+            let o = store.outbox[i]
+            var m: [String: Any] = ["t": "send", "req": o.req, "to": o.to, "body": o.body]
+            if let sim = o.sim { m["sim"] = sim }
+            guard send(m) else { return }
+            store.outbox[i].session = session
+        }
+        if !store.pendingRead.isEmpty {
+            let ids = store.pendingRead.sorted { (Int64($0) ?? 0) < (Int64($1) ?? 0) }
+            for start in stride(from: 0, to: ids.count, by: 500) {
+                guard send(["t": "read", "ids": Array(ids[start..<min(start + 500, ids.count)])]) else { return }
+            }
+            store.pendingRead = []
+        }
+        store.save()
     }
 
     func declineCall(_ id: String) { send(["t": "call.decline", "call": id]) }
@@ -161,6 +180,7 @@ final class Central: NSObject {
     }
 
     private func reset() {
+        store.session = nil
         pingSentAt = nil
         serviceMissing = false
         peripheral = nil
@@ -221,13 +241,17 @@ final class Central: NSObject {
                 log.notice("live")
                 retryDelay = 1
                 store.link = .linked
+                store.session = UUID().uuidString
                 lastKnown = peripheral?.identifier
                 manager.stopScan()
+                // A ring alert from before the link dropped may be stale; Android sends `call.ring` again if it still rings.
+                if let r = store.ringing { Notify.clear(r.id); store.ringing = nil }
                 for kind in ["sms", "calls"] {
                     store.syncing.insert(kind)
                     send(["t": "sync", "kind": kind, "cursor": store.cursors[kind] ?? NSNull(), "limit": 200])
                 }
                 if store.contacts.isEmpty { refreshContacts() }
+                flush()
             case .message(let m) where m.str("t") == "pong":
                 pingSentAt = nil
             case .message(let m):
@@ -235,7 +259,7 @@ final class Central: NSObject {
                     && (m["perms"] as? [String: Any])?["contacts"] as? Bool == true
                     && store.status?.perms["contacts"] == false
                 store.apply(m)
-                if contactsNowAllowed { refreshContacts() }
+                if contactsNowAllowed || m.str("t") == "contacts.changed" { refreshContacts() }
                 if m.str("t") == "unpair" { lastKnown = nil }
             }
         }

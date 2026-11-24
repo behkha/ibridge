@@ -15,6 +15,18 @@ struct SMS: Codable, Identifiable, Equatable {
     var incoming: Bool { dir == "in" }
 }
 
+/// A text written on the iPhone, kept until Android's own record of it arrives (PROTOCOL.md 6, "While the link is down").
+struct Outgoing: Codable, Equatable {
+    var req: String
+    var to: String
+    var body: String
+    var sim: Int?
+    var ts: Date
+    /// The live session it was written to; nil while it waits for one.
+    var session: String?
+    var failed = false
+}
+
 struct Call: Codable, Identifiable, Equatable {
     var id: String
     var addr: String

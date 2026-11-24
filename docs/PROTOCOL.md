@@ -158,6 +158,7 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 | `hello` | `app`, `ver`, `lang` | `status` |
 | `sync` | `kind`: `sms` \| `calls` \| `contacts`; `cursor`: string or null; `limit` (max 200) | `page` |
 | `send` | `req` (client id), `to`, `body`, `sim`? | `sent` |
+| `read` | `ids`: [sms ids] | — (A marks them read where Android lets it, see "Read state") |
 | `call.decline` | `call` | `call.end` |
 | `ping` | — | `pong` |
 | `unpair` | — | A forgets `I_pub`, then disconnects |
@@ -168,11 +169,14 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 |---|---|---|
 | `status` | `battery` 0–100, `charging`, `sims`: [{`sim`, `carrier`, `signal` 0–4}], `perms`: {`sms`, `calls`, `contacts`, `notifications`, `battery`}, `name` | after `hello`, then on any change, at most every 30 s |
 | `page` | `kind`, `items`, `cursor`, `more` | answer to `sync` |
-| `sms` | `id`, `thread`, `addr`, `name`?, `body`, `ts`, `dir`: `in` \| `out`, `read`, `sim`, `state`: `ok` \| `pending` \| `failed`, `code`? (one-time code found in an incoming text) | each text received or sent on A, and again when a `pending` text becomes `ok` or `failed` |
+| `sms` | `id`, `thread`, `addr`, `name`?, `body`, `ts`, `dir`: `in` \| `out`, `read`, `sim`, `state`: `ok` \| `pending` \| `failed`, `code`? (one-time code found in an incoming text) | each text received or sent on A, and again when a stored text's `state` changes |
+| `sms.read` | `ids`: [sms ids] | texts that became read on A (by any app) |
+| `sms.gone` | `ids`: [sms ids] | texts deleted on A; I deletes them |
 | `otp` | `sms` (its `id`), `code`, `from`, `ts` | right after an `sms` with a one-time code |
 | `call` | `id`, `addr`, `name`?, `kind`: `in` \| `out` \| `missed` \| `rejected`, `ts`, `dur` (s), `sim` | each new call-log row |
-| `call.ring` | `call` (event id), `addr`, `name`?, `sim`, `ts` | an incoming call starts ringing |
+| `call.ring` | `call` (event id), `addr`, `name`?, `sim`, `ts` | an incoming call starts ringing, and again after `hello` while it still rings |
 | `call.end` | `call`, `how`: `answered` \| `missed` \| `declined` \| `ended` | that call stops ringing |
+| `contacts.changed` | — | A's contacts changed (checked at most every 10 s); I re-syncs contacts from `null` |
 | `sent` | `req`, `ok`, `err`? | after a `send` finishes or fails |
 | `pong` | `ts` | answer to `ping` |
 | `unpair` | — | A was unlinked; I forgets `A_pub` |
@@ -190,7 +194,19 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 - A record that would still exceed the packet limit is not sent (A logs it).
 - On every `hello` I re-syncs `sms` and `calls` from its stored cursors, so a text received while the link was down still arrives. Live `sms`/`call` messages and page items share ids, so I de-duplicates by `id`.
 - A cursor is `"v2:<last id>"`; A treats any other cursor as `null`. I moves it past each live item's numeric `id` while no paged sync of that kind is running, so a reconnect only fetches what it missed.
-- Contacts are re-synced from `null` when the user pulls to refresh or `status.perms.contacts` turns true.
+- Contacts are re-synced from `null` when the user pulls to refresh, `status.perms.contacts` turns true, or `contacts.changed` arrives.
+
+### While the link is down
+
+Neither side drops what happened while the other was away.
+- **A** keeps, across restarts, the ids of texts that changed or were deleted and whether contacts changed. Right after its `status` answer to `hello` it sends an `sms` for each text whose `state` changed and that still exists, then `sms.read` and `sms.gone` (at most 500 ids per message), and `contacts.changed`. New texts and calls come through the cursor sync instead. A `status` is also sent at once when `perms` change.
+- **I** keeps an outbox of `send` and `read` messages and sends them in order once live. A `send` leaves the outbox when it is written to a live link; I shows it as a pending text until A's own `sms` for it arrives (same number, same body) or `sent` fails. One that was written to a link that dropped before any answer, and still has no `sms` once the next `sms` sync finishes, is shown as failed for the user to retry, never re-sent on its own: a duplicate text is worse than a retry.
+
+### Read state
+
+- I marks the incoming texts of a conversation read when the user opens it with the app in the foreground, and sends their ids in `read` (via the outbox).
+- A sets `read = 1` on those rows. Android ignores writes to the text store by an app that is not the default SMS app unless the `WRITE_SMS` app-op is allowed (`adb shell appops set app.ibridge.android WRITE_SMS allow`); A then logs that nothing changed.
+- When texts become read on A (by any app, "mark all read" included), A sends their ids in `sms.read`. On I, `read` only goes from false to true: a re-sent text never turns unread again.
 
 ### One-time codes
 

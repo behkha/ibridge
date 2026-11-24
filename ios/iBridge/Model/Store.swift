@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 import UserNotifications
 
 /// Everything the screens show. The Bluetooth central writes it; the views read it. Main actor only.
@@ -24,6 +25,15 @@ final class Store {
     var dataOwner: Data?
     /// A one-off problem to show the user, e.g. a text that failed to send.
     var alert: String?
+    /// Texts and read marks waiting for a live link, oldest first.
+    var outbox: [Outgoing] = []
+    var pendingRead: Set<String> = []
+    /// Id of the live session, nil while not linked. Set by the central.
+    var session: String?
+    /// The conversation on screen: its texts are read as they arrive, without a banner.
+    var openThread: String?
+    /// Set by the central: sends what the outbox holds when the link is live.
+    var onOutbox: (() -> Void)?
 
     var isDemo = false
     /// Demo only: the conversation to open on launch.
@@ -33,8 +43,16 @@ final class Store {
 
     var peerName: String { peer?.name ?? status?.name ?? "Android" }
 
+    /// Stored texts plus the ones still in the outbox, shown as pending (sent to Android) or queued (waiting for it).
+    private var allTexts: [SMS] {
+        Array(messages.values) + outbox.map { o in
+            SMS(id: "out-\(o.req)", thread: storedThread(for: o.to) ?? "to:\(o.to)", addr: o.to, name: nil, body: o.body, ts: o.ts,
+                dir: "out", read: true, sim: o.sim ?? 1, state: o.failed ? "failed" : o.session == nil ? "queued" : "pending")
+        }
+    }
+
     var threads: [ThreadRow] {
-        Dictionary(grouping: messages.values, by: \.thread).compactMap { id, items in
+        Dictionary(grouping: allTexts, by: \.thread).compactMap { id, items in
             guard let last = items.max(by: { $0.ts < $1.ts }) else { return nil }
             let title = items.compactMap(\.name).first ?? contactName(for: last.addr) ?? last.addr
             return ThreadRow(id: id, addr: last.addr, title: title, last: last, unread: items.filter { $0.incoming && !$0.read }.count)
@@ -42,7 +60,7 @@ final class Store {
     }
 
     func conversation(_ thread: String) -> [SMS] {
-        messages.values.filter { $0.thread == thread }.sorted { $0.ts < $1.ts }
+        allTexts.filter { $0.thread == thread }.sorted { $0.ts < $1.ts }
     }
 
     var callList: [Call] { calls.values.sorted { $0.ts > $1.ts } }
@@ -55,10 +73,17 @@ final class Store {
 
     /// The thread a number already has, matched on its last 9 digits like contact names.
     func threadID(for addr: String) -> String? {
-        let digits = addr.filter(\.isNumber)
-        // Short (service) numbers match exactly; full numbers on their last 9 digits (0912… vs +98912…).
-        let match: (String) -> Bool = digits.count < 9 ? { $0.filter(\.isNumber) == digits } : { $0.filter(\.isNumber).hasSuffix(digits.suffix(9)) }
-        return messages.values.filter { match($0.addr) }.max { $0.ts < $1.ts }?.thread
+        allTexts.filter { Self.sameNumber($0.addr, addr) }.max { $0.ts < $1.ts }?.thread
+    }
+
+    private func storedThread(for addr: String) -> String? {
+        messages.values.filter { Self.sameNumber($0.addr, addr) }.max { $0.ts < $1.ts }?.thread
+    }
+
+    /// Short (service) numbers match exactly; full numbers on their last 9 digits (0912… vs +98912…).
+    static func sameNumber(_ a: String, _ b: String) -> Bool {
+        let x = a.filter(\.isNumber), y = b.filter(\.isNumber)
+        return y.count < 9 ? x == y : x.hasSuffix(y.suffix(9))
     }
 
     func contactName(for addr: String) -> String? {
@@ -82,6 +107,14 @@ final class Store {
             status = PhoneStatus(m)
         case "sms":
             if let s = SMS(m) { insert(s, notify: true); takeCode(m, sms: s); advance("sms", to: s.id) }
+        case "sms.read":
+            let ids = m["ids"] as? [String] ?? []
+            for id in ids where messages[id]?.read == false { messages[id]?.read = true }
+            Notify.clearTexts(ids)
+        case "sms.gone":
+            let ids = m["ids"] as? [String] ?? []
+            ids.forEach { messages[$0] = nil }
+            Notify.clearTexts(ids)
         case "otp":
             if let code = m.str("code"), let ts = m.date("ts") {
                 latestCode = OneTimeCode(sms: m.str("sms") ?? "", code: code, from: m.str("from") ?? "", ts: ts)
@@ -94,13 +127,21 @@ final class Store {
                 Notify.call(id: id, from: m.str("name") ?? contactName(for: addr) ?? addr, addr: addr)
             }
         case "call.end":
-            if ringing?.id == m.str("call") { ringing = nil }
-            if let id = m.str("call") { Notify.clear(id) }
+            guard let id = m.str("call") else { break }
+            Notify.clear(id)
+            if let r = ringing, r.id == id {
+                ringing = nil
+                if m.str("how") == "missed" { Notify.missed(id: id, from: r.name ?? contactName(for: r.addr) ?? r.addr) }
+            }
         case "page":
             page(m)
         case "sent":
+            let i = outbox.firstIndex { $0.req == m.str("req") }
             if m.bool("ok") == false {
+                if let i { outbox[i].failed = true }
                 alert = String(localized: "Your text wasn’t sent. Check the Android phone’s signal and try again.")
+            } else if let i {
+                outbox.remove(at: i) // Android's own record of it arrives (or arrived) as an `sms`
             }
         case "unpair":
             unpair()
@@ -111,11 +152,55 @@ final class Store {
     }
 
     private func insert(_ s: SMS, notify: Bool) {
-        let isNew = messages[s.id] == nil
+        var s = s
+        let old = messages[s.id]
+        if old?.read == true { s.read = true } // read never turns back to unread (PROTOCOL.md "Read state")
+        let onScreen = openThread == s.thread && UIApplication.shared.applicationState == .active
+        if onScreen && s.incoming && !s.read { s.read = true; pendingRead.insert(s.id); onOutbox?() }
         messages[s.id] = s
         _ = tint(for: s.addr)
-        if notify && isNew && s.incoming {
+        if !s.incoming, let i = outbox.firstIndex(where: { $0.session != nil && Self.sameNumber($0.to, s.addr) && $0.body.trimmingCharacters(in: .whitespacesAndNewlines) == s.body.trimmingCharacters(in: .whitespacesAndNewlines) }) {
+            outbox.remove(at: i) // Android's record of a text sent from here replaces the pending copy
+        }
+        if notify && old == nil && s.incoming && !s.read {
             Notify.text(id: s.id, from: s.name ?? contactName(for: s.addr) ?? s.addr, body: s.body)
+        }
+    }
+
+    // MARK: outgoing
+
+    /// Queues a text; the central sends it now when live, or as soon as the link is back.
+    @discardableResult
+    func enqueue(to: String, body: String, sim: Int?) -> String {
+        let req = UUID().uuidString
+        outbox.append(Outgoing(req: req, to: to, body: body, sim: sim, ts: Date()))
+        save()
+        onOutbox?()
+        return req
+    }
+
+    /// Retry of a failed text: the failed copy goes, a new one is queued.
+    func retry(_ m: SMS) {
+        if m.id.hasPrefix("out-") { outbox.removeAll { "out-\($0.req)" == m.id } } else { messages[m.id] = nil }
+        enqueue(to: m.addr, body: m.body, sim: m.sim)
+    }
+
+    /// The user is looking at this conversation: its incoming texts are read, here and (via the outbox) on Android.
+    func markRead(thread: String) {
+        let ids = messages.values.filter { $0.thread == thread && $0.incoming && !$0.read }.map(\.id)
+        guard !ids.isEmpty else { return }
+        ids.forEach { messages[$0]?.read = true }
+        pendingRead.formUnion(ids)
+        Notify.clearTexts(ids)
+        save()
+        onOutbox?()
+    }
+
+    /// Texts written to a link that dropped before Android answered, and still unknown to Android after the next
+    /// full sms sync: shown as failed for the user to retry, never re-sent on their own (a duplicate is worse).
+    private func failOrphans() {
+        for i in outbox.indices where outbox[i].session != nil && outbox[i].session != session && !outbox[i].failed {
+            outbox[i].failed = true
         }
     }
 
@@ -140,6 +225,7 @@ final class Store {
         if (m.bool("more") ?? false) { onMorePages?(kind, m.str("cursor")) } else {
             syncing.remove(kind)
             if kind == "contacts" { cursors["contacts"] = nil }
+            if kind == "sms" { failOrphans() }
         }
     }
 
@@ -165,7 +251,7 @@ final class Store {
     func adopt(_ p: PairedPeer) {
         peer = p
         if dataOwner != p.publicKey {
-            messages = [:]; calls = [:]; contacts = []; cursors = [:]; latestCode = nil; tints = [:]
+            messages = [:]; calls = [:]; contacts = []; cursors = [:]; latestCode = nil; tints = [:]; outbox = []; pendingRead = []
             dataOwner = p.publicKey
         }
         save()
@@ -174,6 +260,8 @@ final class Store {
     func unpair() {
         cursors = [:]
         syncing = []
+        outbox = [] // never send these through a phone paired later
+        pendingRead = []
         peer = nil
         link = .unpaired
         status = nil
@@ -185,6 +273,8 @@ final class Store {
     private struct Saved: Codable {
         var messages: [SMS]; var calls: [Call]; var contacts: [Contact]; var code: OneTimeCode?; var tints: [String: Int]; var cursors: [String: String]
         var owner: Data?
+        var outbox: [Outgoing]?
+        var read: [String]?
     }
 
     private static var file: URL {
@@ -204,11 +294,14 @@ final class Store {
         tints = s.tints
         cursors = s.cursors
         dataOwner = s.owner
+        outbox = s.outbox ?? []
+        pendingRead = Set(s.read ?? [])
     }
 
     func save() {
         guard !isDemo else { return }
-        let s = Saved(messages: Array(messages.values), calls: Array(calls.values), contacts: contacts, code: latestCode, tints: tints, cursors: cursors, owner: dataOwner)
+        let s = Saved(messages: Array(messages.values), calls: Array(calls.values), contacts: contacts, code: latestCode, tints: tints, cursors: cursors, owner: dataOwner,
+                      outbox: outbox, read: Array(pendingRead))
         try? JSONEncoder().encode(s).write(to: Self.file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
     }
 }
@@ -256,5 +349,20 @@ enum Notify {
 
     static func clear(_ callId: String) {
         UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["call-\(callId)"])
+    }
+
+    /// The ring alert goes when the call stops; a missed call leaves this one in its place.
+    static func missed(id: String, from: String) {
+        let n = UNMutableNotificationContent()
+        n.title = from
+        n.body = String(localized: "Missed call")
+        n.sound = .default
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "missed-\(id)", content: n, trigger: nil))
+    }
+
+    /// Texts read or deleted (here or on Android) leave Notification Center.
+    static func clearTexts(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids.map { "sms-\($0)" })
     }
 }

@@ -47,11 +47,15 @@ class BridgeService : Service() {
     private val observerThread = HandlerThread("ibridge-observers").apply { start() }
     private val observerHandler = Handler(observerThread.looper)
 
-    /** Highest `_id` already pushed live, so the observers only send new rows. */
-    private var lastSmsId = 0L
-    private val pendingSms = mutableSetOf<Long>()
+    /** Every text's read bit and type at the last look; the SMS observer diffs against it. */
+    private var smsStates: HashMap<Long, Int>? = null
+    /** Highest call-log `_id` already pushed live, so the observer only sends new rows. */
     private var lastCallId = 0L
     private var lastStatusAt = 0L
+    private var lastPerms = ""
+
+    /** What changed while the iPhone was away (PROTOCOL.md 6, "While the link is down"). Kept across restarts. */
+    private val away by lazy { getSharedPreferences("away", MODE_PRIVATE) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -77,6 +81,7 @@ class BridgeService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         gatt.start()
         registerObservers() // permissions may have been granted since onCreate
+        gatt.post { sendStatus() } // sent at once when perms changed
         if (intent?.action == ACTION_UNLINK) gatt.post {
             push(JSONObject().put("t", "unpair"))
             Link.setPeer(null)
@@ -89,6 +94,7 @@ class BridgeService : Service() {
         scope.cancel()
         contentResolver.unregisterContentObserver(smsObserver)
         contentResolver.unregisterContentObserver(callObserver)
+        contentResolver.unregisterContentObserver(contactsObserver)
         unregisterReceiver(stateReceiver)
         gatt.stop()
         observerThread.quitSafely()
@@ -137,7 +143,11 @@ class BridgeService : Service() {
     private fun onMessage(m: JSONObject) {
         Log.i(TAG, "← ${m.optString("t")} ${m.optString("kind", m.optString("call"))}")
         when (m.optString("t")) {
-            "hello" -> sendStatus(force = true)
+            "hello" -> { sendStatus(force = true); catchUp() }
+            "read" -> {
+                val ids = m.optJSONArray("ids")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).toLongOrNull() } }.orEmpty()
+                Log.i(TAG, "marked ${phone.markRead(ids)} of ${ids.size} texts read")
+            }
             "ping" -> push(JSONObject().put("t", "pong").put("ts", System.currentTimeMillis()))
             "sync" -> sync(m)
             "send" -> sendText(m)
@@ -157,12 +167,38 @@ class BridgeService : Service() {
         .put("notifications", phone.has(Manifest.permission.POST_NOTIFICATIONS))
         .put("battery", phone.ignoresBatteryOptimizations())
 
+    /** At most every 30 s, but at once when forced or when a permission changed. */
     private fun sendStatus(force: Boolean = false) {
+        if (gatt.engine?.isLive != true) return
         val now = System.currentTimeMillis()
-        if (!force && now - lastStatusAt < 30_000) return
-        if (push(phone.status(deviceName(this), perms()))) lastStatusAt = now
+        val perms = perms()
+        if (!force && now - lastStatusAt < 30_000 && perms.toString() == lastPerms) return
+        if (push(phone.status(deviceName(this), perms))) { lastStatusAt = now; lastPerms = perms.toString() }
         Link.setSignal(phone.signalLevel())
     }
+
+    /** Right after `status`: what changed while the iPhone was away. New texts and calls come by cursor sync. */
+    private fun catchUp() {
+        ringMsg?.let { push(it) }
+        val state = awayIds("state")
+        if (state.isNotEmpty() && phone.smsByIds(state).all { push(JSONObject(it.toString()).put("t", "sms")) }) clearAway("state")
+        for ((key, type) in listOf("read" to "sms.read", "gone" to "sms.gone")) {
+            val ids = awayIds(key)
+            if (ids.isNotEmpty() && pushIds(type, ids)) clearAway(key)
+        }
+        if (away.getBoolean("contacts", false) && push(JSONObject().put("t", "contacts.changed"))) away.edit().putBoolean("contacts", false).apply()
+    }
+
+    private fun awayIds(key: String): List<Long> = away.getStringSet(key, emptySet())!!.mapNotNull { it.toLongOrNull() }
+    private fun keepAway(key: String, ids: Collection<Long>) {
+        if (ids.isEmpty()) return
+        away.edit().putStringSet(key, HashSet(away.getStringSet(key, emptySet())!!).apply { ids.forEach { add(it.toString()) } }).apply()
+    }
+    private fun clearAway(key: String) = away.edit().remove(key).apply()
+
+    /** `sms.read` / `sms.gone` in messages of at most 500 ids. False when any part could not be sent. */
+    private fun pushIds(type: String, ids: Collection<Long>): Boolean =
+        ids.isEmpty() || ids.sorted().chunked(500).map { chunk -> push(JSONObject().put("t", type).put("ids", JSONArray(chunk.map(Long::toString)))) }.all { it }
 
     /**
      * One page of history (PROTOCOL.md 6, "Sync and cursors"). Full history, oldest first.
@@ -211,7 +247,7 @@ class BridgeService : Service() {
         val sent = PendingIntent.getBroadcast(this, req.hashCode(), Intent(action).setPackage(packageName), PendingIntent.FLAG_IMMUTABLE)
         var remaining = parts.size
         var ok = true
-        registerReceiver(object : BroadcastReceiver() {
+        val receiver = object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) {
                 ok = ok && resultCode == android.app.Activity.RESULT_OK
                 if (--remaining > 0) return
@@ -220,8 +256,15 @@ class BridgeService : Service() {
                     push(JSONObject().put("t", "sent").put("req", req).put("ok", ok).apply { if (!ok) put("err", "carrier refused") })
                 }
             }
-        }, IntentFilter(action), RECEIVER_NOT_EXPORTED)
-        sms.sendMultipartTextMessage(to, null, parts, ArrayList(List(parts.size) { sent }), null)
+        }
+        registerReceiver(receiver, IntentFilter(action), RECEIVER_NOT_EXPORTED)
+        try {
+            sms.sendMultipartTextMessage(to, null, parts, ArrayList(List(parts.size) { sent }), null)
+        } catch (e: Exception) { // e.g. a number the radio rejects: answer anyway, or the iPhone waits forever
+            Log.w(TAG, "send failed: ${e.javaClass.simpleName}")
+            unregisterReceiver(receiver)
+            push(JSONObject().put("t", "sent").put("req", req).put("ok", false).put("err", "not sent"))
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -231,37 +274,50 @@ class BridgeService : Service() {
         val ended = getSystemService(TelecomManager::class.java).endCall()
         if (ended) {
             push(JSONObject().put("t", "call.end").put("call", callId).put("how", "declined"))
-            if (ringing?.first == callId) ringing = null // the IDLE broadcast that follows is not a missed call
+            if (ringing?.first == callId) { ringing = null; ringMsg = null } // the IDLE broadcast that follows is not a missed call
         }
     }
 
     // ---- live events ----
 
+    private var smsScan = 0
+
+    /** One look 300 ms after the text store goes quiet: an incoming text fires several changes. */
     private val smsObserver = object : ContentObserver(observerHandler) {
         override fun onChange(selfChange: Boolean) = gatt.post {
-            // Texts whose sending was still pending: push again once their state settles.
-            phone.smsByIds(pendingSms).forEach { item ->
-                if (item.getString("state") == "pending") return@forEach
-                pendingSms.remove(item.getString("id").toLong())
-                push(JSONObject(item.toString()).put("t", "sms"))
-            }
-            val rows = phone.smsAfter(lastSmsId, 0, 50)
-            rows.forEach { item ->
-                val id = item.getString("id").toLong()
-                lastSmsId = maxOf(lastSmsId, id)
-                if (item.getString("state") == "pending") pendingSms += id
-                if (!push(JSONObject(item.toString()).put("t", "sms"))) {
-                    if (Link.peer != null && item.optString("dir") == "in") Link.countWaiting()
-                    return@forEach
-                }
-                Link.countSent(text = true)
-                item.optString("code").takeIf { it.isNotEmpty() }?.let { code ->
-                    push(
-                        JSONObject().put("t", "otp").put("sms", item.getString("id")).put("code", code)
-                            .put("from", item.optString("name", item.getString("addr"))).put("ts", item.getLong("ts"))
-                    )
-                }
-            }
+            val n = ++smsScan
+            gatt.post(delayMs = 300) { if (n == smsScan) scanSms() }
+        }
+    }
+
+    /** Diffs the text store against the last look: new texts, read ones, re-stated ones (pending → ok / failed), deleted ones. */
+    private fun scanSms() {
+        val now = phone.smsStates() ?: return // no permission, or the read failed: look again on the next change
+        val before = smsStates ?: run { smsStates = now; return }
+        smsStates = now
+        val added = now.keys.filter { it !in before }
+        val restated = now.filter { (id, v) -> before[id]?.let { it shr 1 != v shr 1 } == true }.keys
+        val read = now.filter { (id, v) -> before[id]?.let { it and 1 == 0 && v and 1 == 1 } == true }.keys
+        val gone = before.keys.filter { it !in now }
+        phone.smsByIds(added).forEach(::pushNewSms)
+        phone.smsByIds(restated).forEach { item ->
+            if (!push(JSONObject(item.toString()).put("t", "sms"))) keepAway("state", listOf(item.getString("id").toLong()))
+        }
+        if (!pushIds("sms.read", read)) keepAway("read", read)
+        if (!pushIds("sms.gone", gone)) keepAway("gone", gone)
+    }
+
+    private fun pushNewSms(item: JSONObject) {
+        if (!push(JSONObject(item.toString()).put("t", "sms"))) {
+            if (Link.peer != null && item.optString("dir") == "in") Link.countWaiting()
+            return
+        }
+        Link.countSent(text = true)
+        item.optString("code").takeIf { it.isNotEmpty() }?.let { code ->
+            push(
+                JSONObject().put("t", "otp").put("sms", item.getString("id")).put("code", code)
+                    .put("from", item.optString("name", item.getString("addr"))).put("ts", item.getLong("ts"))
+            )
         }
     }
 
@@ -274,13 +330,34 @@ class BridgeService : Service() {
         }
     }
 
+    private var contactsCheckDue = false
+
+    /** Contacts sync accounts touch the store often: look at most every 10 s, and only tell the iPhone on a real change. */
+    private val contactsObserver = object : ContentObserver(observerHandler) {
+        override fun onChange(selfChange: Boolean) = gatt.post {
+            if (contactsCheckDue) return@post
+            contactsCheckDue = true
+            gatt.post(delayMs = 10_000) { contactsCheckDue = false; checkContacts() }
+        }
+    }
+
+    private fun checkContacts() {
+        if (!phone.has(Manifest.permission.READ_CONTACTS)) return
+        val sig = phone.contactsSignature()
+        if (sig == away.getInt("contacts_sig", 0)) return
+        phone.forgetNames() // a number that had no name may have one now
+        val sent = push(JSONObject().put("t", "contacts.changed"))
+        away.edit().putInt("contacts_sig", sig).putBoolean("contacts", !sent).apply()
+    }
+
     private var smsWatched = false
     private var callsWatched = false
+    private var contactsWatched = false
 
     /** Idempotent. Starts from the newest row so only texts and calls after this moment go out live. */
     private fun registerObservers() = gatt.post {
         if (!smsWatched && phone.has(Manifest.permission.READ_SMS)) {
-            lastSmsId = phone.latestSmsId()
+            smsStates = phone.smsStates()
             contentResolver.registerContentObserver(Telephony.Sms.CONTENT_URI, true, smsObserver)
             smsWatched = true
         }
@@ -289,10 +366,17 @@ class BridgeService : Service() {
             contentResolver.registerContentObserver(CallLog.Calls.CONTENT_URI, true, callObserver)
             callsWatched = true
         }
+        if (!contactsWatched && phone.has(Manifest.permission.READ_CONTACTS)) {
+            contentResolver.registerContentObserver(android.provider.ContactsContract.Contacts.CONTENT_URI, true, contactsObserver)
+            contactsWatched = true
+            checkContacts() // contacts may have changed while the service was not running
+        }
     }
 
     /** Ringing state from [CallReceiver]: one `call.ring`, then one `call.end`. */
     private var ringing: Pair<String, String>? = null
+    /** The `call.ring` of the call still ringing, sent again after `hello` (the iPhone may have relinked mid-ring). */
+    private var ringMsg: JSONObject? = null
 
     private fun onCallEvent(e: CallEvent) {
         when (e.state) {
@@ -301,14 +385,13 @@ class BridgeService : Service() {
                 if (ringing?.second == number) return
                 val id = "c${System.currentTimeMillis()}"
                 ringing = id to number
-                push(
-                    JSONObject().put("t", "call.ring").put("call", id).put("addr", number)
-                        .putOpt("name", phone.nameFor(number)).put("sim", e.subId?.let { phone.slotForSubscription(it) } ?: 1)
-                        .put("ts", System.currentTimeMillis())
-                )
+                ringMsg = JSONObject().put("t", "call.ring").put("call", id).put("addr", number)
+                    .putOpt("name", phone.nameFor(number)).put("sim", e.subId?.let { phone.slotForSubscription(it) } ?: 1)
+                    .put("ts", System.currentTimeMillis())
+                push(ringMsg!!)
             }
-            "OFFHOOK" -> ringing?.let { (id, _) -> push(JSONObject().put("t", "call.end").put("call", id).put("how", "answered")); ringing = null }
-            "IDLE" -> ringing?.let { (id, _) -> push(JSONObject().put("t", "call.end").put("call", id).put("how", "missed")); ringing = null }
+            "OFFHOOK" -> ringing?.let { (id, _) -> push(JSONObject().put("t", "call.end").put("call", id).put("how", "answered")); ringing = null; ringMsg = null }
+            "IDLE" -> ringing?.let { (id, _) -> push(JSONObject().put("t", "call.end").put("call", id).put("how", "missed")); ringing = null; ringMsg = null }
         }
     }
 

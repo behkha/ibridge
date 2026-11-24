@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             case "reply":
                 if let text = (response as? UNTextInputNotificationResponse)?.userText, !text.isEmpty, !addr.isEmpty {
                     Self.central?.declineCall(call)
-                    _ = Self.central?.sendText(to: addr, body: text)
+                    Self.central?.sendText(to: addr, body: text)
                 }
             default: break
             }

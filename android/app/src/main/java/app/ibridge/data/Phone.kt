@@ -120,16 +120,47 @@ class Phone(private val context: Context) {
         )?.use { c -> buildList { while (c.moveToNext()) add(smsItem(c)) } }.orEmpty()
     }
 
-    /** Re-reads specific texts, to follow a sent text from pending to sent or failed. */
+    /** Re-reads specific texts, oldest first: new rows, and rows whose state changed. */
     fun smsByIds(ids: Collection<Long>): List<JSONObject> {
         if (ids.isEmpty() || !has(Manifest.permission.READ_SMS)) return emptyList()
-        return query(
-            Telephony.Sms.CONTENT_URI, smsCols, "${Telephony.Sms._ID} IN (${ids.joinToString(",")})", null,
-            "${Telephony.Sms._ID} ASC", ids.size,
-        )?.use { c -> buildList { while (c.moveToNext()) add(smsItem(c)) } }.orEmpty()
+        return ids.sorted().chunked(500).flatMap { chunk ->
+            query(
+                Telephony.Sms.CONTENT_URI, smsCols, "${Telephony.Sms._ID} IN (${chunk.joinToString(",")})", null,
+                "${Telephony.Sms._ID} ASC", chunk.size,
+            )?.use { c -> buildList { while (c.moveToNext()) add(smsItem(c)) } }.orEmpty()
+        }
     }
 
-    fun latestSmsId(): Long = maxId(Telephony.Sms.CONTENT_URI, Telephony.Sms._ID, Manifest.permission.READ_SMS)
+    /**
+     * Every text as `_id` → read bit | type shl 1. The SMS observer diffs two of these to find new,
+     * read, re-stated (pending → sent / failed) and deleted texts. Ids and two ints only: cheap even at 10k rows.
+     */
+    fun smsStates(): HashMap<Long, Int>? {
+        if (!has(Manifest.permission.READ_SMS)) return null
+        // Null, never empty or partial, when the read fails: that would look like every text was deleted.
+        return runCatching {
+            resolver.query(
+                Telephony.Sms.CONTENT_URI, arrayOf(Telephony.Sms._ID, Telephony.Sms.READ, Telephony.Sms.TYPE),
+                "${Telephony.Sms.TYPE} != ${Telephony.Sms.MESSAGE_TYPE_DRAFT}", null, null,
+            )?.use { c ->
+                HashMap<Long, Int>(c.count * 2).apply { while (c.moveToNext()) put(c.getLong(0), c.getInt(1).coerceIn(0, 1) or (c.getInt(2) shl 1)) }
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Marks texts read in Android's text store. Android ignores the write (0 rows) unless iBridge is the
+     * default SMS app or holds the WRITE_SMS app-op (PROTOCOL.md "Read state").
+     */
+    fun markRead(ids: Collection<Long>): Int {
+        if (ids.isEmpty() || !has(Manifest.permission.READ_SMS)) return 0
+        val values = android.content.ContentValues().apply { put(Telephony.Sms.READ, 1); put(Telephony.Sms.SEEN, 1) }
+        return ids.chunked(500).sumOf { chunk ->
+            runCatching {
+                resolver.update(Telephony.Sms.CONTENT_URI, values, "${Telephony.Sms._ID} IN (${chunk.joinToString(",")}) AND ${Telephony.Sms.READ} = 0", null)
+            }.getOrDefault(0)
+        }
+    }
 
     // ---- calls ----
 
@@ -192,6 +223,21 @@ class Phone(private val context: Context) {
             }
         }
         return byId.values.toList()
+    }
+
+    /** A hash of every contact's name and numbers: changes when a contact is added, edited or deleted. */
+    fun contactsSignature(): Int {
+        if (!has(Manifest.permission.READ_CONTACTS)) return 0
+        var h = 1
+        runCatching {
+            resolver.query(
+                PhoneKind.CONTENT_URI, arrayOf(PhoneKind.CONTACT_ID, PhoneKind.DISPLAY_NAME, PhoneKind.NUMBER, PhoneKind.TYPE, PhoneKind.LABEL),
+                null, null, "${PhoneKind.CONTACT_ID} ASC, ${PhoneKind.NUMBER} ASC",
+            )?.use { c ->
+                while (c.moveToNext()) for (i in 0 until 5) h = 31 * h + (c.getString(i)?.hashCode() ?: 0)
+            }
+        }
+        return h
     }
 
     // ---- status ----

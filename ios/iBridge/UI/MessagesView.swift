@@ -88,11 +88,13 @@ struct Chat: Hashable {
 struct ConversationView: View {
     @Environment(Store.self) private var store
     @Environment(\.central) private var central
+    @Environment(\.scenePhase) private var scenePhase
     var chat: Chat
     @State private var draft = ""
 
     var body: some View {
-        let thread = chat.thread ?? store.threadID(for: chat.addr)
+        // A "to:" thread holds only queued texts: once Android's copy arrives, the number's real thread takes over.
+        let thread = chat.thread.flatMap { $0.hasPrefix("to:") ? nil : $0 } ?? store.threadID(for: chat.addr)
         let items = thread.map(store.conversation) ?? []
         let addr = items.last?.addr ?? chat.addr
         let title = items.last?.name ?? store.contactName(for: addr) ?? Fmt.phone(addr)
@@ -114,10 +116,10 @@ struct ConversationView: View {
                                 Text(Fmt.day(m.ts)).font(.app(12, .semibold)).foregroundStyle(Palette.secondary)
                                     .padding(.top, 8).padding(.bottom, 4)
                             }
-                            Bubble(message: m, lastInGroup: next.map { !Self.sameGroup(m, $0) } ?? true, canRetry: store.link == .linked) {
+                            Bubble(message: m, lastInGroup: next.map { !Self.sameGroup(m, $0) } ?? true, canRetry: store.peer != nil,
+                                   waiting: String(localized: "Waiting for \(Fmt.isolate(store.peerName))")) {
                                 // Resend; the new copy replaces the failed one here (Android keeps its own record).
-                                _ = central?.sendText(to: m.addr, body: m.body, sim: m.sim)
-                                store.messages[m.id] = nil
+                                store.retry(m)
                             }
                             .id(m.id)
                         }
@@ -146,6 +148,17 @@ struct ConversationView: View {
         }
         .toolbar(.visible, for: .navigationBar)
         .toolbar(.hidden, for: .tabBar)
+        // Read as seen: on open, on each new text while open, and on coming back to the app.
+        .onAppear { seen(thread) }
+        .onChange(of: thread) { seen(thread) }
+        .onChange(of: items.last?.id) { seen(thread) }
+        .onChange(of: scenePhase) { seen(thread) }
+        .onDisappear { if store.openThread == thread { store.openThread = nil } }
+    }
+
+    private func seen(_ thread: String?) {
+        store.openThread = scenePhase == .active ? thread : nil
+        if scenePhase == .active, let thread { store.markRead(thread: thread) }
     }
 
     /// Same direction, same day, under 10 minutes apart: one group, one time label.
@@ -154,7 +167,7 @@ struct ConversationView: View {
     }
 
     private func composer(addr: String, sim: Int?, showSim: Bool) -> some View {
-        let live = store.link == .linked
+        let live = store.peer != nil // while out of reach, texts wait in the outbox
         let away: Bool = { if case .outOfReach = store.link { return true }; return false }()
         let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let placeholder: String = {
@@ -168,9 +181,8 @@ struct ConversationView: View {
                 .padding(.horizontal, 14).padding(.vertical, 7)
                 .frame(minHeight: 36)
                 .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Palette.separator))
-                .disabled(away)
             Button {
-                _ = central?.sendText(to: addr, body: draft, sim: sim) // reply on the SIM the conversation uses
+                central?.sendText(to: addr, body: draft, sim: sim) // reply on the SIM the conversation uses
                 draft = ""
             } label: {
                 Image(systemName: "arrow.up").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
@@ -191,6 +203,7 @@ private struct Bubble: View {
     var message: SMS
     var lastInGroup: Bool
     var canRetry: Bool
+    var waiting: String
     var retry: () -> Void
 
     var body: some View {
@@ -218,6 +231,9 @@ private struct Bubble: View {
                 .buttonStyle(.plain)
                 .disabled(!canRetry)
                 .padding(.horizontal, 6).padding(.bottom, 6)
+            } else if m.state == "queued" && lastInGroup {
+                Text(waiting).font(.app(12)).foregroundStyle(Palette.secondary)
+                    .padding(.horizontal, 6).padding(.bottom, 6)
             } else if lastInGroup {
                 Text(Fmt.time(m.ts)).font(.app(12)).foregroundStyle(Palette.secondary)
                     .padding(.horizontal, 6).padding(.bottom, 6)
