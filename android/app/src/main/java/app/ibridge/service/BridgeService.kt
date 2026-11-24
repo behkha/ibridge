@@ -169,12 +169,12 @@ class BridgeService : Service() {
 
     /** At most every 30 s, but at once when forced or when a permission changed. */
     private fun sendStatus(force: Boolean = false) {
+        Link.setSignal(phone.signalLevel())
         if (gatt.engine?.isLive != true) return
         val now = System.currentTimeMillis()
         val perms = perms()
         if (!force && now - lastStatusAt < 30_000 && perms.toString() == lastPerms) return
         if (push(phone.status(deviceName(this), perms))) { lastStatusAt = now; lastPerms = perms.toString() }
-        Link.setSignal(phone.signalLevel())
     }
 
     /** Right after `status`: what changed while the iPhone was away. New texts and calls come by cursor sync. */
@@ -190,8 +190,9 @@ class BridgeService : Service() {
     }
 
     private fun awayIds(key: String): List<Long> = away.getStringSet(key, emptySet())!!.mapNotNull { it.toLongOrNull() }
+    /** Only for a paired iPhone: with none, there is no one to catch up. */
     private fun keepAway(key: String, ids: Collection<Long>) {
-        if (ids.isEmpty()) return
+        if (ids.isEmpty() || Link.peer == null) return
         away.edit().putStringSet(key, HashSet(away.getStringSet(key, emptySet())!!).apply { ids.forEach { add(it.toString()) } }).apply()
     }
     private fun clearAway(key: String) = away.edit().remove(key).apply()
@@ -300,9 +301,7 @@ class BridgeService : Service() {
         val read = now.filter { (id, v) -> before[id]?.let { it and 1 == 0 && v and 1 == 1 } == true }.keys
         val gone = before.keys.filter { it !in now }
         phone.smsByIds(added).forEach(::pushNewSms)
-        phone.smsByIds(restated).forEach { item ->
-            if (!push(JSONObject(item.toString()).put("t", "sms"))) keepAway("state", listOf(item.getString("id").toLong()))
-        }
+        keepAway("state", phone.smsByIds(restated).filterNot { push(JSONObject(it.toString()).put("t", "sms")) }.map { it.getString("id").toLong() })
         if (!pushIds("sms.read", read)) keepAway("read", read)
         if (!pushIds("sms.gone", gone)) keepAway("gone", gone)
     }

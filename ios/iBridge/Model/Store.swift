@@ -47,7 +47,7 @@ final class Store {
     private var allTexts: [SMS] {
         Array(messages.values) + outbox.map { o in
             SMS(id: "out-\(o.req)", thread: storedThread(for: o.to) ?? "to:\(o.to)", addr: o.to, name: nil, body: o.body, ts: o.ts,
-                dir: "out", read: true, sim: o.sim ?? 1, state: o.failed ? "failed" : o.session == nil ? "queued" : "pending")
+                dir: "out", read: true, sim: o.sim ?? 0, state: o.failed ? "failed" : o.session == nil ? "queued" : "pending")
         }
     }
 
@@ -81,8 +81,10 @@ final class Store {
     }
 
     /// Short (service) numbers match exactly; full numbers on their last 9 digits (0912… vs +98912…).
+    /// Senders without digits ("MyBank") match on their name.
     static func sameNumber(_ a: String, _ b: String) -> Bool {
         let x = a.filter(\.isNumber), y = b.filter(\.isNumber)
+        if y.isEmpty { return x.isEmpty && a.caseInsensitiveCompare(b) == .orderedSame }
         return y.count < 9 ? x == y : x.hasSuffix(y.suffix(9))
     }
 
@@ -120,7 +122,7 @@ final class Store {
                 latestCode = OneTimeCode(sms: m.str("sms") ?? "", code: code, from: m.str("from") ?? "", ts: ts)
             }
         case "call":
-            if let c = Call(m) { calls[c.id] = c; advance("calls", to: c.id) }
+            if let c = Call(m) { addCall(c); advance("calls", to: c.id) }
         case "call.ring":
             if let id = m.str("call"), let addr = m.str("addr") {
                 ringing = (id, addr, m.str("name"))
@@ -129,10 +131,7 @@ final class Store {
         case "call.end":
             guard let id = m.str("call") else { break }
             Notify.clear(id)
-            if let r = ringing, r.id == id {
-                ringing = nil
-                if m.str("how") == "missed" { Notify.missed(id: id, from: r.name ?? contactName(for: r.addr) ?? r.addr) }
-            }
+            if ringing?.id == id { ringing = nil } // a missed call is announced by its call-log row: `kind` tells missed from declined
         case "page":
             page(m)
         case "sent":
@@ -141,7 +140,7 @@ final class Store {
                 if let i { outbox[i].failed = true }
                 alert = String(localized: "Your text wasn’t sent. Check the Android phone’s signal and try again.")
             } else if let i {
-                outbox.remove(at: i) // Android's own record of it arrives (or arrived) as an `sms`
+                outbox[i].sent = true // stays pending until Android's own `sms` row for it arrives
             }
         case "unpair":
             unpair()
@@ -149,6 +148,7 @@ final class Store {
             break
         }
         save()
+        if !pendingRead.isEmpty { onOutbox?() }
     }
 
     private func insert(_ s: SMS, notify: Bool) {
@@ -156,10 +156,12 @@ final class Store {
         let old = messages[s.id]
         if old?.read == true { s.read = true } // read never turns back to unread (PROTOCOL.md "Read state")
         let onScreen = openThread == s.thread && UIApplication.shared.applicationState == .active
-        if onScreen && s.incoming && !s.read { s.read = true; pendingRead.insert(s.id); onOutbox?() }
+        if onScreen && s.incoming && !s.read { s.read = true; pendingRead.insert(s.id) } // sent once apply() is done
         messages[s.id] = s
         _ = tint(for: s.addr)
-        if !s.incoming, let i = outbox.firstIndex(where: { $0.session != nil && Self.sameNumber($0.to, s.addr) && $0.body.trimmingCharacters(in: .whitespacesAndNewlines) == s.body.trimmingCharacters(in: .whitespacesAndNewlines) }) {
+        // Android dates the row when it sends; 5 minutes of slack for the two phones' clocks keeps an older identical text out.
+        if !s.incoming, let i = outbox.firstIndex(where: { $0.session != nil && s.ts > $0.ts.addingTimeInterval(-300) && Self.sameNumber($0.to, s.addr)
+            && $0.body.trimmingCharacters(in: .whitespacesAndNewlines) == s.body.trimmingCharacters(in: .whitespacesAndNewlines) }) {
             outbox.remove(at: i) // Android's record of a text sent from here replaces the pending copy
         }
         if notify && old == nil && s.incoming && !s.read {
@@ -182,7 +184,15 @@ final class Store {
     /// Retry of a failed text: the failed copy goes, a new one is queued.
     func retry(_ m: SMS) {
         if m.id.hasPrefix("out-") { outbox.removeAll { "out-\($0.req)" == m.id } } else { messages[m.id] = nil }
-        enqueue(to: m.addr, body: m.body, sim: m.sim)
+        enqueue(to: m.addr, body: m.body, sim: m.sim > 0 ? m.sim : nil)
+    }
+
+    private func addCall(_ c: Call, notify: Bool = true) {
+        let isNew = calls[c.id] == nil
+        calls[c.id] = c
+        if notify && isNew && c.kind == "missed" && Date().timeIntervalSince(c.ts) < 600 {
+            Notify.missed(id: c.id, from: c.name ?? contactName(for: c.addr) ?? c.addr)
+        }
     }
 
     /// The user is looking at this conversation: its incoming texts are read, here and (via the outbox) on Android.
@@ -199,6 +209,8 @@ final class Store {
     /// Texts written to a link that dropped before Android answered, and still unknown to Android after the next
     /// full sms sync: shown as failed for the user to retry, never re-sent on their own (a duplicate is worse).
     private func failOrphans() {
+        // One Android confirmed but whose row never came was sent all the same: it goes.
+        outbox.removeAll { $0.session != nil && $0.session != session && $0.sent == true }
         for i in outbox.indices where outbox[i].session != nil && outbox[i].session != session && !outbox[i].failed {
             outbox[i].failed = true
         }
@@ -215,7 +227,7 @@ final class Store {
                 insert(s, notify: !s.read && Date().timeIntervalSince(s.ts) < 600)
                 takeCode(item, sms: s)
             }
-        case "calls": items.compactMap(Call.init).forEach { calls[$0.id] = $0 }
+        case "calls": items.compactMap(Call.init).forEach { addCall($0) } // calls missed while away: recent ones alert
         case "contacts":
             let fresh = items.compactMap(Contact.init)
             if cursors["contacts"] == nil { contacts = fresh } else { contacts += fresh }

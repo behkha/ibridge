@@ -99,7 +99,7 @@ struct ConversationView: View {
         let addr = items.last?.addr ?? chat.addr
         let title = items.last?.name ?? store.contactName(for: addr) ?? Fmt.phone(addr)
         let sims = store.status?.sims.count ?? 0
-        let sim = items.last?.sim ?? store.status?.sims.first?.sim
+        let sim = items.last.flatMap { $0.sim > 0 ? $0.sim : nil } ?? store.status?.sims.first?.sim // 0: a queued text on the default SIM
         VStack(spacing: 0) {
             if case .outOfReach(let since) = store.link {
                 OutOfReachStrip(name: store.peerName, since: since,

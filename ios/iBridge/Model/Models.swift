@@ -25,6 +25,8 @@ struct Outgoing: Codable, Equatable {
     /// The live session it was written to; nil while it waits for one.
     var session: String?
     var failed = false
+    /// Android answered `sent` ok; the copy waits only for Android's own `sms` row.
+    var sent: Bool?
 }
 
 struct Call: Codable, Identifiable, Equatable {

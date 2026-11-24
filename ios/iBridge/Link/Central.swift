@@ -101,10 +101,15 @@ final class Central: NSObject {
 
     func declineCall(_ id: String) { send(["t": "call.decline", "call": id]) }
 
+    /// Set when contacts changed during a contacts sync: one more full sync runs when it ends.
+    private var contactsAgain = false
+
+    /// Full contacts sync from `null`. Two at once would interleave their pages, so a second ask waits for the first.
     func refreshContacts() {
+        if store.syncing.contains("contacts") { contactsAgain = true; return }
+        guard send(["t": "sync", "kind": "contacts", "cursor": NSNull(), "limit": 200]) else { return }
         store.cursors["contacts"] = nil
         store.syncing.insert("contacts")
-        send(["t": "sync", "kind": "contacts", "cursor": NSNull(), "limit": 200])
     }
 
     @discardableResult
@@ -181,6 +186,8 @@ final class Central: NSObject {
 
     private func reset() {
         store.session = nil
+        store.syncing = [] // pages of a dropped session never arrive
+        contactsAgain = false
         pingSentAt = nil
         serviceMissing = false
         peripheral = nil
@@ -260,6 +267,10 @@ final class Central: NSObject {
                     && store.status?.perms["contacts"] == false
                 store.apply(m)
                 if contactsNowAllowed || m.str("t") == "contacts.changed" { refreshContacts() }
+                if contactsAgain, m.str("t") == "page", m.str("kind") == "contacts", !store.syncing.contains("contacts") {
+                    contactsAgain = false
+                    refreshContacts()
+                }
                 if m.str("t") == "unpair" { lastKnown = nil }
             }
         }

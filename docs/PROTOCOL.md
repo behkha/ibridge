@@ -175,7 +175,7 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 | `otp` | `sms` (its `id`), `code`, `from`, `ts` | right after an `sms` with a one-time code |
 | `call` | `id`, `addr`, `name`?, `kind`: `in` \| `out` \| `missed` \| `rejected`, `ts`, `dur` (s), `sim` | each new call-log row |
 | `call.ring` | `call` (event id), `addr`, `name`?, `sim`, `ts` | an incoming call starts ringing, and again after `hello` while it still rings |
-| `call.end` | `call`, `how`: `answered` \| `missed` \| `declined` \| `ended` | that call stops ringing |
+| `call.end` | `call`, `how`: `answered` \| `missed` \| `declined` \| `ended` | that call stops ringing (`missed` also covers a call declined on A; the `call` row's `kind` tells them apart, and I alerts on `kind: missed`) |
 | `contacts.changed` | — | A's contacts changed (checked at most every 10 s); I re-syncs contacts from `null` |
 | `sent` | `req`, `ok`, `err`? | after a `send` finishes or fails |
 | `pong` | `ts` | answer to `ping` |
@@ -199,8 +199,8 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 ### While the link is down
 
 Neither side drops what happened while the other was away.
-- **A** keeps, across restarts, the ids of texts that changed or were deleted and whether contacts changed. Right after its `status` answer to `hello` it sends an `sms` for each text whose `state` changed and that still exists, then `sms.read` and `sms.gone` (at most 500 ids per message), and `contacts.changed`. New texts and calls come through the cursor sync instead. A `status` is also sent at once when `perms` change.
-- **I** keeps an outbox of `send` and `read` messages and sends them in order once live. A `send` leaves the outbox when it is written to a live link; I shows it as a pending text until A's own `sms` for it arrives (same number, same body) or `sent` fails. One that was written to a link that dropped before any answer, and still has no `sms` once the next `sms` sync finishes, is shown as failed for the user to retry, never re-sent on its own: a duplicate text is worse than a retry.
+- **A** keeps, across restarts, the ids of texts it saw change or go while I was away, and whether contacts changed (a change made while A's service was not running is missed for texts; contacts are compared with the last version I was told about). Right after its `status` answer to `hello` it sends an `sms` for each text whose `state` changed and that still exists, then `sms.read` and `sms.gone` (at most 500 ids per message), and `contacts.changed`. New texts and calls come through the cursor sync instead. A `status` is also sent at once when `perms` change.
+- **I** keeps an outbox of `send` and `read` messages and sends them in order once live. A `send` written to a live link stays in the outbox, shown as a pending text, until A's own `sms` for it arrives (same number, same body, dated at most 5 minutes before it was written); `sent` with `ok: false` shows it as failed. Once the next session's `sms` sync finishes, one still without its `sms` goes if A had answered `sent` ok, and is shown as failed otherwise, for the user to retry; it is never re-sent on its own: a duplicate text is worse than a retry.
 
 ### Read state
 
