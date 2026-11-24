@@ -108,7 +108,7 @@ class Gatt(
         tx.addDescriptor(BluetoothGattDescriptor(Proto.CCCD, BluetoothGattDescriptor.PERMISSION_READ_ENCRYPTED or BluetoothGattDescriptor.PERMISSION_WRITE_ENCRYPTED))
         service.addCharacteristic(rx)
         service.addCharacteristic(tx)
-        s.addService(service) // onServiceAdded rings the doorbell of an iPhone left from an earlier run
+        s.addService(service) // onServiceAdded releases a link the iPhone kept from an earlier run
         server = s
         unlinkedSince = System.currentTimeMillis()
         advertise()
@@ -187,7 +187,9 @@ class Gatt(
         if (device == d) return true
         if (device != null) return false
         device = d
-        engine = newEngine({ p -> sendPacket(p) }, { post { stopAdvertising() } })
+        engine = newEngine({ p -> sendPacket(p) }, {
+            post { stopAdvertising(); prefs.edit().putString("iphone", d.address).apply() }
+        })
         Log.i(TAG, "central claimed the link")
         post(delayMs = 20_000) { if (device == d && engine?.isLive != true) { Log.w(TAG, "no session in 20 s"); drop(d) } }
         return true
@@ -221,57 +223,45 @@ class Gatt(
         post(delayMs = 300) { if (device == d) drop(d) }
     }
 
+    /** The iPhone that last held a live session, so a later run can find it on a leftover link. */
+    private val prefs = context.getSharedPreferences("gatt", Context.MODE_PRIVATE)
+
     /**
-     * A previous run may have died with the iPhone still connected. The iPhone opened that radio link, so
-     * Android cannot drop it, and a suspended iPhone app is not woken by Service Changed. Ring its doorbell
-     * (PROTOCOL.md section 1): a write to a characteristic the iPhone hosts wakes iBridge there, and it
-     * reconnects to this run. Devices without a doorbell (watches, earbuds) are left alone.
+     * A previous run may have died with the iPhone still connected. The iPhone opened that radio link, and a
+     * suspended iPhone app is woken neither by Service Changed nor by anything sent over the link, so it would
+     * sit on a dead session. A GATT server cannot drop a link it did not open, but a GATT client can: open and
+     * release a client connection on it, and with no app holding the link the stack drops it after 1 s
+     * (PROTOCOL.md section 1). The iPhone wakes on the disconnect and its pending connect reaches this run.
+     * Only the paired iPhone's link is touched, never a watch's or a computer's.
      */
-    private fun ringDoorbells() {
+    private fun releaseLeftoverLink() {
+        val last = prefs.getString("iphone", null) ?: return
         manager.getConnectedDevices(BluetoothProfile.GATT_SERVER)
-            .filter { it.bondState == BluetoothDevice.BOND_BONDED && it != device }
-            .forEach { ring(it) }
+            .filter { it.address == last && it != device }
+            .forEach { release(it) }
     }
 
-    private fun ring(d: BluetoothDevice) {
+    private fun release(d: BluetoothDevice) {
         val cb = object : BluetoothGattCallback() {
             private val done = AtomicBoolean(false)
             fun finish(g: BluetoothGatt, what: String) {
                 if (!done.compareAndSet(false, true)) return
-                Log.i(TAG, "doorbell: $what")
-                g.disconnect() // releases only this app's use of the link; the iPhone's own connection stays
+                Log.i(TAG, "leftover link: $what")
+                g.disconnect()
                 g.close()
             }
 
-            override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
-                if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) g.discoverServices()
-                else finish(g, "link gone before ringing ($status)")
-            }
-
-            override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-                if (status != BluetoothGatt.GATT_SUCCESS) return finish(g, "discovery failed ($status)")
-                val wake = g.getService(Proto.DOORBELL)?.getCharacteristic(Proto.WAKE)
-                    ?: return finish(g, "no doorbell on that device")
-                val type = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-                val ok = if (Build.VERSION.SDK_INT >= 33) {
-                    g.writeCharacteristic(wake, byteArrayOf(1), type) == BluetoothGatt.GATT_SUCCESS
-                } else {
-                    @Suppress("DEPRECATION") run { wake.writeType = type; wake.value = byteArrayOf(1); g.writeCharacteristic(wake) }
-                }
-                if (!ok) finish(g, "write not started")
-            }
-
-            override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) =
-                finish(g, if (status == BluetoothGatt.GATT_SUCCESS) "rang" else "write failed ($status)")
+            override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) =
+                finish(g, if (newState == BluetoothProfile.STATE_CONNECTED) "held, now released" else "already gone ($status)")
         }
-        Log.i(TAG, "doorbell: ringing a device left on the link from an earlier run")
+        Log.i(TAG, "leftover link: the iPhone is still on a link from an earlier run")
         val g = d.connectGatt(context, false, cb, BluetoothDevice.TRANSPORT_LE) ?: return
-        post(delayMs = 15_000) { cb.finish(g, "timed out") } // never hold the link if the iPhone does not answer
+        post(delayMs = 15_000) { cb.finish(g, "timed out") }
     }
 
     private val callback = object : BluetoothGattServerCallback() {
         override fun onServiceAdded(status: Int, service: BluetoothGattService) = post {
-            if (status == BluetoothGatt.GATT_SUCCESS && service.uuid == Proto.SERVICE) ringDoorbells()
+            if (status == BluetoothGatt.GATT_SUCCESS && service.uuid == Proto.SERVICE) releaseLeftoverLink()
         }
 
         override fun onConnectionStateChange(d: BluetoothDevice, status: Int, newState: Int) = post {

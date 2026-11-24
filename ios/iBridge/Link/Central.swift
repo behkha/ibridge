@@ -29,7 +29,6 @@ final class Central: NSObject {
     }
 
     private var watchdog: Timer?
-    private var doorbell: Doorbell?
     private var pingSentAt: Date?
 
     init(store: Store) {
@@ -43,7 +42,6 @@ final class Central: NSObject {
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkLink(probe: true) }
         }
-        doorbell = Doorbell(isPaired: { [weak self] in self?.store.peer != nil }) { [weak self] in self?.rang() }
         store.onMorePages = { [weak self] kind, cursor in self?.send(["t": "sync", "kind": kind, "cursor": cursor ?? NSNull(), "limit": 200]) }
     }
 
@@ -67,7 +65,6 @@ final class Central: NSObject {
         send(["t": "unpair"])
         lastKnown = nil
         store.unpair()
-        doorbell?.update()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.disconnect() }
     }
 
@@ -96,24 +93,7 @@ final class Central: NSObject {
 
     // MARK: connection
 
-    /// Android's iBridge restarted on a radio link that stayed up, so the session we hold is probably dead.
-    /// A session that answers a ping is already with the new run (we reconnected first) and stays.
-    /// Otherwise drop it and connect again; the pause lets iOS finish the cancel before the new connect.
-    /// Timers don't run while suspended, so this uses asyncAfter inside the wake's run time.
-    private func rang() {
-        guard store.peer != nil, pairing == nil else { return }
-        if handshake?.isLive == true, pingSentAt == nil, send(["t": "ping"]) {
-            pingSentAt = Date()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
-                guard let self, self.pingSentAt != nil else { return }
-                log.notice("doorbell: no pong; dropping the old session")
-                reconnect()
-            }
-            return
-        }
-        reconnect()
-    }
-
+    /// Drops the connection and connects again; the pause lets iOS finish the cancel before the new connect.
     private func reconnect() {
         disconnect()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.connectOrScan() }
@@ -227,7 +207,6 @@ final class Central: NSObject {
                 pairing = nil
                 PeerStore.save(peer)
                 store.adopt(peer)
-                doorbell?.update()
                 lastKnown = peripheral?.identifier
                 log.notice("paired with \(peer.name, privacy: .public)")
             case .live:
@@ -248,7 +227,7 @@ final class Central: NSObject {
                     && store.status?.perms["contacts"] == false
                 store.apply(m)
                 if contactsNowAllowed { refreshContacts() }
-                if m.str("t") == "unpair" { lastKnown = nil; doorbell?.update() }
+                if m.str("t") == "unpair" { lastKnown = nil }
             }
         }
     }
@@ -264,7 +243,6 @@ final class Central: NSObject {
                 if id != nil, id == lastKnown {
                     lastKnown = nil
                     store.unpair()
-                    doorbell?.update()
                     store.pairingError = String(localized: "Your Android phone unlinked this iPhone. Pair again.")
                 }
             case .pairingClosed where pairing != nil:
@@ -282,11 +260,10 @@ final class Central: NSObject {
             default: break
             }
         }
-        disconnect()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.connectOrScan() }
+        reconnect()
     }
 
-    static var appState: String {
+    private static var appState: String {
         switch UIApplication.shared.applicationState {
         case .active: "active"
         case .inactive: "inactive"
@@ -339,7 +316,11 @@ extension Central: CBCentralManagerDelegate {
             if let cur = peripheral {
                 // Keep a live or in-progress link to this same phone. A pending connect to an old
                 // identifier is dropped: Android rotates its address, so the scan result wins.
-                if cur.identifier == p.identifier || cur.state == .connected { return }
+                if cur.identifier == p.identifier || cur.state == .connected {
+                    // Connected before Android's iBridge service was up: its advertising means the service is here now.
+                    if cur.identifier == p.identifier, cur.state == .connected, rx == nil { cur.discoverServices([Proto.service]) }
+                    return
+                }
                 manager.cancelPeripheralConnection(cur)
                 reset()
             }
@@ -382,14 +363,19 @@ extension Central: CBPeripheralDelegate {
     nonisolated func peripheral(_ p: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
         MainActor.assumeIsolated {
             rx = service.characteristics?.first { $0.uuid == Proto.rx }
-            guard rx != nil, let tx = service.characteristics?.first(where: { $0.uuid == Proto.tx }) else { disconnect(); return }
+            // Missing when discovery raced Android re-adding its service: start over rather than sit idle.
+            guard rx != nil, let tx = service.characteristics?.first(where: { $0.uuid == Proto.tx }) else {
+                log.notice("Android's iBridge characteristics missing; reconnecting")
+                reconnect()
+                return
+            }
             p.setNotifyValue(true, for: tx)
         }
     }
 
     nonisolated func peripheral(_ p: CBPeripheral, didUpdateNotificationStateFor c: CBCharacteristic, error: Error?) {
         MainActor.assumeIsolated {
-            if c.isNotifying { ready() } else { disconnect() }
+            if c.isNotifying { ready() } else { reconnect() }
         }
     }
 

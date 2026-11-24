@@ -4,7 +4,7 @@ The Android phone (holds the SIM) and the iPhone talk over Bluetooth LE only. Th
 Every byte after the handshake is encrypted end to end with keys that exist only on the two phones.
 
 Roles: **A** = Android, the GATT **peripheral** (advertises, hosts the service). **I** = iPhone, the GATT **central** (scans, connects).
-iOS keeps a central alive in the background (`bluetooth-central` mode + state restoration); it does not advertise for a backgrounded peripheral, so the roles are fixed. The one exception is the doorbell below, which I hosts and A writes.
+iOS keeps a central alive in the background (`bluetooth-central` mode + state restoration); it does not advertise for a backgrounded peripheral, and it does not wake a suspended app for writes to its own GATT server, so the roles are fixed.
 
 Byte order is big-endian. `||` is concatenation. Public keys are P-256 in uncompressed X9.63 form (65 bytes, `04 || X || Y`) unless stated.
 
@@ -18,16 +18,7 @@ Byte order is big-endian. `||` is concatenation. Public keys are P-256 in uncomp
 
 `RX` writes and the `TX` CCCD require an **encrypted link**, so the first connection makes the phones bond at the OS level (LE Secure Connections, one system prompt on each phone). The bond is for reconnection, not secrecy: with Android's identity key iOS resolves its rotating address, and a pending `connect` completes even while iBridge is suspended. All protection still comes from sections 4 and 5.
 
-Doorbell, hosted by **I** (`bluetooth-peripheral` mode + state restoration), published only while I is paired:
-
-| Item | UUID | Properties |
-|---|---|---|
-| Service | `e38d0004-747f-44a1-b7fc-4a024772eb87` | primary, not advertised |
-| `WAKE` (A → I) | `e38d0005-747f-44a1-b7fc-4a024772eb87` | Write, encrypted link required |
-
-- **Why**: when A's iBridge restarts, the radio link I opened stays up (A cannot drop a link it did not open, and other GATT clients share it). I hears only Service Changed, and iOS does not wake a suspended app for that or for notifications on the replaced characteristics. iOS does wake it for a write to its own characteristic.
-- **Rule**: when A's GATT server starts and a bonded device is already on the link, A connects to it as GATT client over that link and writes `0x01` to `WAKE` (if the device has no doorbell, A just closes). On a write while paired and not pairing, I pings a live session; if no `pong` comes within 3 s (or no session is live) it drops its connection to A and connects again after 1 s, which runs a fresh handshake. The write carries no secret; the encrypted-link requirement only keeps strangers from ringing.
-
+- **Leftover link**: when A's iBridge restarts, the radio link I opened stays up, and I hears only Service Changed. iOS wakes a suspended app neither for that nor for notifications on the replaced characteristics, and a GATT server cannot drop a link it did not open. So when A's GATT server starts and the iPhone that last held a live session is still on the link, A opens a GATT client connection on that link and releases it at once; with no app holding the link, Android's stack drops it after about 1 s. I wakes on the disconnect and its pending connect reaches the new run. A touches no other device's link.
 - **Advertising**: A advertises the 128-bit service UUID, connectable, no name, `ADVERTISE_MODE_LOW_POWER` while linked or idle and `LOW_LATENCY` while the pairing sheet is open. iOS background scans must filter on this UUID.
 - **Identity** is proven by the handshake, not by the address: Android rotates its address. I caches the peripheral identifier of the last good link and calls `connect` on it (pending connects never time out on iOS). If a handshake with some peripheral fails with `NOT_PAIRED`, I ignores that identifier for 15 minutes.
 - **One link at a time**: A's GATT server sees every LE link the phone has (watches, earbuds), so a central takes A's single iBridge slot only when it subscribes to `TX` or writes `RX`. Another central that does either while the slot is taken is disconnected. A central with no live session 20 s after taking the slot is disconnected. A keeps advertising until a session is live.
