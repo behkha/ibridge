@@ -8,6 +8,8 @@ object Proto {
     val SERVICE: UUID = UUID.fromString("e38d0001-747f-44a1-b7fc-4a024772eb87")
     val RX: UUID = UUID.fromString("e38d0002-747f-44a1-b7fc-4a024772eb87")
     val TX: UUID = UUID.fromString("e38d0003-747f-44a1-b7fc-4a024772eb87")
+    val DOORBELL: UUID = UUID.fromString("e38d0004-747f-44a1-b7fc-4a024772eb87")
+    val WAKE: UUID = UUID.fromString("e38d0005-747f-44a1-b7fc-4a024772eb87")
     val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     const val MAX_PACKET = 65_535

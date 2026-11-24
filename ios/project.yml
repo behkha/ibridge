@@ -35,7 +35,7 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        UIBackgroundModes: [bluetooth-central]
+        UIBackgroundModes: [bluetooth-central, bluetooth-peripheral]
         NSBluetoothAlwaysUsageDescription: iBridge talks to your Android phone over Bluetooth to bring its texts and calls here.
         NSCameraUsageDescription: iBridge scans the pairing code shown on your Android phone.
         UIAppFonts: [Vazirmatn-Regular.ttf, Vazirmatn-Medium.ttf, Vazirmatn-SemiBold.ttf, Vazirmatn-Bold.ttf]

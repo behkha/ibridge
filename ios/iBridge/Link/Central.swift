@@ -29,6 +29,7 @@ final class Central: NSObject {
     }
 
     private var watchdog: Timer?
+    private var doorbell: Doorbell?
     private var pingSentAt: Date?
 
     init(store: Store) {
@@ -42,6 +43,7 @@ final class Central: NSObject {
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.checkLink(probe: true) }
         }
+        doorbell = Doorbell(isPaired: { [weak self] in self?.store.peer != nil }) { [weak self] in self?.rang() }
         store.onMorePages = { [weak self] kind, cursor in self?.send(["t": "sync", "kind": kind, "cursor": cursor ?? NSNull(), "limit": 200]) }
     }
 
@@ -65,6 +67,7 @@ final class Central: NSObject {
         send(["t": "unpair"])
         lastKnown = nil
         store.unpair()
+        doorbell?.update()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.disconnect() }
     }
 
@@ -92,6 +95,14 @@ final class Central: NSObject {
     }
 
     // MARK: connection
+
+    /// Android's iBridge restarted on a radio link that stayed up: whatever session we hold is dead.
+    /// Drop it and connect again; the pause lets iOS finish the cancel before the new connect.
+    private func rang() {
+        guard store.peer != nil, pairing == nil else { return }
+        disconnect()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.connectOrScan() }
+    }
 
     /// Keeps a scan and a pending connect running while not linked. With `probe`, pings a link that looks live:
     /// a restarted Android can leave the radio link up with no session behind it.
@@ -201,6 +212,7 @@ final class Central: NSObject {
                 pairing = nil
                 PeerStore.save(peer)
                 store.adopt(peer)
+                doorbell?.update()
                 lastKnown = peripheral?.identifier
                 log.notice("paired with \(peer.name, privacy: .public)")
             case .live:
@@ -236,6 +248,7 @@ final class Central: NSObject {
                 if id != nil, id == lastKnown {
                     lastKnown = nil
                     store.unpair()
+                    doorbell?.update()
                     store.pairingError = String(localized: "Your Android phone unlinked this iPhone. Pair again.")
                 }
             case .pairingClosed where pairing != nil:
@@ -257,7 +270,7 @@ final class Central: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.connectOrScan() }
     }
 
-    private static var appState: String {
+    static var appState: String {
         switch UIApplication.shared.applicationState {
         case .active: "active"
         case .inactive: "inactive"

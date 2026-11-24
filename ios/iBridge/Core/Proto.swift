@@ -6,6 +6,8 @@ enum Proto {
     static let service = CBUUID(string: "e38d0001-747f-44a1-b7fc-4a024772eb87")
     static let rx = CBUUID(string: "e38d0002-747f-44a1-b7fc-4a024772eb87")
     static let tx = CBUUID(string: "e38d0003-747f-44a1-b7fc-4a024772eb87")
+    static let doorbell = CBUUID(string: "e38d0004-747f-44a1-b7fc-4a024772eb87")
+    static let wake = CBUUID(string: "e38d0005-747f-44a1-b7fc-4a024772eb87")
 
     static let maxPacket = 65_535
 

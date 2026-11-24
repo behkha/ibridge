@@ -4,7 +4,7 @@ The Android phone (holds the SIM) and the iPhone talk over Bluetooth LE only. Th
 Every byte after the handshake is encrypted end to end with keys that exist only on the two phones.
 
 Roles: **A** = Android, the GATT **peripheral** (advertises, hosts the service). **I** = iPhone, the GATT **central** (scans, connects).
-iOS keeps a central alive in the background (`bluetooth-central` mode + state restoration); it does not do that for a peripheral, so the roles are fixed.
+iOS keeps a central alive in the background (`bluetooth-central` mode + state restoration); it does not advertise for a backgrounded peripheral, so the roles are fixed. The one exception is the doorbell below, which I hosts and A writes.
 
 Byte order is big-endian. `||` is concatenation. Public keys are P-256 in uncompressed X9.63 form (65 bytes, `04 || X || Y`) unless stated.
 
@@ -17,6 +17,16 @@ Byte order is big-endian. `||` is concatenation. Public keys are P-256 in uncomp
 | `TX` (A → I) | `e38d0003-747f-44a1-b7fc-4a024772eb87` | Notify (CCCD `2902`) |
 
 `RX` writes and the `TX` CCCD require an **encrypted link**, so the first connection makes the phones bond at the OS level (LE Secure Connections, one system prompt on each phone). The bond is for reconnection, not secrecy: with Android's identity key iOS resolves its rotating address, and a pending `connect` completes even while iBridge is suspended. All protection still comes from sections 4 and 5.
+
+Doorbell, hosted by **I** (`bluetooth-peripheral` mode + state restoration), published only while I is paired:
+
+| Item | UUID | Properties |
+|---|---|---|
+| Service | `e38d0004-747f-44a1-b7fc-4a024772eb87` | primary, not advertised |
+| `WAKE` (A → I) | `e38d0005-747f-44a1-b7fc-4a024772eb87` | Write, encrypted link required |
+
+- **Why**: when A's iBridge restarts, the radio link I opened stays up (A cannot drop a link it did not open, and other GATT clients share it). I hears only Service Changed, and iOS does not wake a suspended app for that or for notifications on the replaced characteristics. iOS does wake it for a write to its own characteristic.
+- **Rule**: when A's GATT server starts and a bonded device is already on the link, A connects to it as GATT client over that link and writes `0x01` to `WAKE` (if the device has no doorbell, A just closes). On any write, I drops its session and connection to A and connects again after 1 s, which runs a fresh handshake. The write carries no secret; the encrypted-link requirement only keeps strangers from ringing.
 
 - **Advertising**: A advertises the 128-bit service UUID, connectable, no name, `ADVERTISE_MODE_LOW_POWER` while linked or idle and `LOW_LATENCY` while the pairing sheet is open. iOS background scans must filter on this UUID.
 - **Identity** is proven by the handshake, not by the address: Android rotates its address. I caches the peripheral identifier of the last good link and calls `connect` on it (pending connects never time out on iOS). If a handshake with some peripheral fails with `NOT_PAIRED`, I ignores that identifier for 15 minutes.
