@@ -119,9 +119,27 @@ enum Fmt {
 
     static func initials(_ title: String) -> String {
         let words = title.split(separator: " ").filter { !$0.isEmpty }
-        guard let first = words.first else { return "?" }
-        if first.allSatisfy({ $0.isNumber || $0 == "+" }) { return String(title.filter(\.isNumber).prefix(2)) }
-        if first.unicodeScalars.first.map({ (0x0600...0x06FF).contains(Int($0.value)) }) == true { return String(first.prefix(1)) }
-        return words.prefix(2).compactMap(\.first).map { String($0).uppercased() }.joined()
+        guard let first = words.first else { return "" }
+        if first.allSatisfy({ $0.isNumber || $0 == "+" }) {
+            // A full international number would show its country code ("98") on every unknown sender: person glyph instead.
+            return first.hasPrefix("+") ? "" : String(title.filter(\.isNumber).prefix(2))
+        }
+        let letters = words.compactMap { $0.first(where: \.isLetter) } // skip emoji and symbols
+        if let f = letters.first, isRTL(String(f)) { return String(f) }
+        return letters.prefix(2).map { String($0).uppercased() }.joined()
+    }
+
+    /// True when the text's first strong letter is right-to-left (Persian, Arabic, Hebrew).
+    static func isRTL(_ s: String) -> Bool {
+        for u in s.unicodeScalars where u.properties.isAlphabetic {
+            return (0x0590...0x08FF).contains(Int(u.value)) || (0xFB1D...0xFEFF).contains(Int(u.value))
+        }
+        return false
+    }
+
+    /// The name to show under a small avatar: the first word that isn't a title like "Dr.".
+    static func firstName(_ title: String) -> String {
+        let words = title.split(separator: " ").map(String.init)
+        return words.first { !$0.hasSuffix(".") } ?? title
     }
 }

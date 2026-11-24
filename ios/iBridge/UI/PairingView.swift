@@ -42,7 +42,12 @@ struct PairingView: View {
                 central?.pair(start)
             }
             .ignoresSafeArea()
-            if hasCamera { Color.black.opacity(0.45).ignoresSafeArea().allowsHitTesting(false) }
+            if hasCamera {
+                Color.black.opacity(0.45).ignoresSafeArea().allowsHitTesting(false)
+                // Extra shade at the top so Cancel and the title stay readable over a bright feed.
+                LinearGradient(colors: [.black.opacity(0.5), .clear], startPoint: .top, endPoint: .center)
+                    .ignoresSafeArea().allowsHitTesting(false)
+            }
             VStack(spacing: 0) {
                 HStack {
                     Button("Cancel", action: cancel)

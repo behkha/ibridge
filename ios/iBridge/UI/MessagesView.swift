@@ -50,7 +50,7 @@ private struct ThreadCell: View {
             Avatar(title: Fmt.digits(row.title), tint: store.tintColor(for: row.addr, title: row.title))
             VStack(alignment: .leading, spacing: Font.isPersian ? 0 : 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Text(Fmt.digits(row.title)).font(.app(Font.isPersian ? 16 : 17, .semibold)).foregroundStyle(Palette.ink).lineLimit(1)
+                    Text(row.title == row.addr ? Fmt.ltr(Fmt.phone(row.title)) : Fmt.digits(row.title)).font(.app(Font.isPersian ? 16 : 17, .semibold)).foregroundStyle(Palette.ink).lineLimit(1)
                     Spacer(minLength: 0)
                     Text(Fmt.when(row.last.ts)).font(.app(Font.isPersian ? 14 : 15)).foregroundStyle(Palette.secondary)
                 }
@@ -198,7 +198,10 @@ private struct Bubble: View {
                                            bottomTrailingRadius: m.incoming ? 18 : tail, topTrailingRadius: 18)
         VStack(alignment: m.incoming ? .leading : .trailing, spacing: 2) {
             Text(m.body)
-                .font(.app(Font.isPersian ? 16 : 17)).lineSpacing(Font.isPersian ? 6 : 2)
+                .font(.app(Font.isPersian || Fmt.isRTL(m.body) ? 16 : 17)).lineSpacing(Font.isPersian || Fmt.isRTL(m.body) ? 6 : 2)
+                .multilineTextAlignment(.leading)
+                // Each text runs in its own direction: Persian aligns right even in the English app, and vice versa.
+                .environment(\.layoutDirection, Fmt.isRTL(m.body) ? .rightToLeft : .leftToRight)
                 .foregroundStyle(m.incoming ? Palette.ink : .white)
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(m.incoming ? Palette.field : Palette.accent, in: shape)

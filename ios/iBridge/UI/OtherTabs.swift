@@ -110,7 +110,7 @@ struct ContactsView: View {
                                 Button { path = [Chat(thread: r.id, addr: r.addr)] } label: {
                                     VStack(spacing: 6) {
                                         Avatar(title: r.title, tint: store.tintColor(for: r.addr, title: r.title), size: 52)
-                                        Text(r.title.split(separator: " ").first.map(String.init) ?? r.title)
+                                        Text(Fmt.firstName(r.title))
                                             .font(.app(13)).foregroundStyle(Palette.ink).lineLimit(1)
                                     }
                                     .frame(width: 60)
@@ -165,7 +165,7 @@ private struct ContactRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(c.name).font(.app(17, .semibold)).foregroundStyle(Palette.ink).lineLimit(1)
                 if let p = c.phones.first {
-                    Text(Fmt.phone(p.n) + (c.phones.count > 1 ? "  +\(Fmt.digits(String(c.phones.count - 1)))" : ""))
+                    Text(Fmt.phone(p.n))
                         .font(.app(14)).foregroundStyle(Palette.secondary)
                         .environment(\.layoutDirection, .leftToRight)
                 }

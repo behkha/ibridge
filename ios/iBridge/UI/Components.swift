@@ -193,8 +193,15 @@ struct Avatar: View {
     var size: CGFloat = 48
 
     var body: some View {
-        Text(Fmt.initials(title))
-            .font(.app(18, .semibold)).foregroundStyle(.white)
+        let initials = Fmt.initials(title)
+        Group {
+            if initials.isEmpty {
+                Image(systemName: "person.fill").font(.system(size: size * 0.42))
+            } else {
+                Text(initials).font(.app(18, .semibold))
+            }
+        }
+            .foregroundStyle(.white)
             .frame(width: size, height: size)
             .background(tint, in: Circle())
             .accessibilityHidden(true)
