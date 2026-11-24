@@ -631,16 +631,6 @@
         }
       }
     },
-    "Sends when %@ is back": {
-      "localizations": {
-        "fa": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "وقتی %@ برگردد ارسال می‌شود"
-          }
-        }
-      }
-    },
     "Text from SIM %@": {
       "localizations": {
         "fa": {
@@ -727,6 +717,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "باتری"
+          }
+        }
+      }
+    },
+    "Camera not available": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "دوربین در دسترس نیست"
           }
         }
       }

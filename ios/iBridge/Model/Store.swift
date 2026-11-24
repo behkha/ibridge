@@ -55,9 +55,10 @@ final class Store {
 
     /// The thread a number already has, matched on its last 9 digits like contact names.
     func threadID(for addr: String) -> String? {
-        let digits = addr.filter(\.isNumber).suffix(9)
-        guard digits.count >= 6 else { return messages.values.first { $0.addr == addr }?.thread }
-        return messages.values.filter { $0.addr.filter(\.isNumber).hasSuffix(digits) }.max { $0.ts < $1.ts }?.thread
+        let digits = addr.filter(\.isNumber)
+        // Short (service) numbers match exactly; full numbers on their last 9 digits (0912… vs +98912…).
+        let match: (String) -> Bool = digits.count < 9 ? { $0.filter(\.isNumber) == digits } : { $0.filter(\.isNumber).hasSuffix(digits.suffix(9)) }
+        return messages.values.filter { match($0.addr) }.max { $0.ts < $1.ts }?.thread
     }
 
     func contactName(for addr: String) -> String? {

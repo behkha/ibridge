@@ -39,7 +39,8 @@ object Link {
             lastSentAt = prefs.getLong("last_sent", 0),
             textsToday = if (today) prefs.getInt("texts", 0) else 0,
             callsToday = if (today) prefs.getInt("calls", 0) else 0,
-            awaySince = prefs.getLong("away_since", 0),
+            // The process may have died while linked: away from now until the iPhone connects.
+            awaySince = prefs.getLong("away_since", 0).takeIf { it > 0 } ?: if (peer != null) System.currentTimeMillis() else 0,
             waiting = prefs.getInt("waiting", 0),
         )
     }

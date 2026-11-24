@@ -10,18 +10,22 @@ struct PairingView: View {
     @State private var code = ""
     /// Who we are linking to while the handshake runs (the QR carries the Android phone's name).
     @State private var linking: String?
+    /// The QR that just failed: ignored until it changes or the user taps the error, so the camera doesn't retry it every frame.
+    @State private var failedQR: String?
+    @State private var lastQR: String?
+    private let hasCamera = AVCaptureDevice.default(for: .video) != nil && AVCaptureDevice.authorizationStatus(for: .video) != .denied
 
     var body: some View {
         Group {
             if typing { codeEntry } else { viewfinder }
         }
-        .onChange(of: store.pairingError) { if store.pairingError != nil { linking = nil } }
+        .onChange(of: store.pairingError) { if store.pairingError != nil { failedQR = lastQR; linking = nil } }
         .onChange(of: store.link) { if store.link == .linked { dismiss() } }
     }
 
-    private func cancel() { central?.cancelPairing(); dismiss() }
+    private func cancel() { central?.cancelPairing(); store.pairingError = nil; dismiss() }
 
-    private func switchMode() { typing.toggle(); store.pairingError = nil; linking = nil; code = "" }
+    private func switchMode() { typing.toggle(); store.pairingError = nil; linking = nil; failedQR = nil; code = "" }
 
     // MARK: camera
 
@@ -29,8 +33,10 @@ struct PairingView: View {
         ZStack {
             Palette.camera.ignoresSafeArea()
             QRScanner { text in
-                guard linking == nil, let start = PairingStart.parse(text), case .qr(_, _, let name) = start else { return }
+                guard linking == nil, text != failedQR, let start = PairingStart.parse(text), case .qr(_, _, let name) = start else { return }
                 store.pairingError = nil
+                failedQR = nil
+                lastQR = text
                 linking = name
                 central?.pair(start)
             }
@@ -47,16 +53,20 @@ struct PairingView: View {
                     .padding(.top, 24).padding(.horizontal, 8)
                 Spacer(minLength: 24)
                 Reticle(color: linking == nil ? .white : Palette.scanned).frame(width: 250, height: 250)
-                Spacer(minLength: 24)
-                if let card = statusCard {
-                    card
-                } else {
-                    Button(action: switchMode) {
-                        Text("Type code instead").font(.app(17, .semibold)).foregroundStyle(.white)
-                            .padding(.horizontal, 24).frame(height: 50)
-                            .background(.white.opacity(0.18), in: Capsule())
+                    .overlay {
+                        if !hasCamera { Text("Camera not available").font(.app(15)).foregroundStyle(.white.opacity(0.8)) }
                     }
-                    .buttonStyle(.plain)
+                Spacer(minLength: 24)
+                VStack(spacing: 12) {
+                    if let card = statusCard { card }
+                    if linking == nil {
+                        Button(action: switchMode) {
+                            Text("Type code instead").font(.app(17, .semibold)).foregroundStyle(.white)
+                                .padding(.horizontal, 24).frame(height: 50)
+                                .background(.white.opacity(0.18), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
             .padding(.horizontal, 16).padding(.top, 6).padding(.bottom, 24)
@@ -104,8 +114,10 @@ struct PairingView: View {
     private var statusCard: StatusCard? {
         if let err = store.pairingError {
             // The error strings are "What happened. What to do." The first sentence is the title.
-            let parts = err.split(separator: ".", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            return StatusCard(kind: .problem, title: parts[0], detail: parts.count > 1 ? parts[1] : nil)
+            let parts = err.split(separator: ".", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+            return StatusCard(kind: .problem, title: parts.first ?? err, detail: parts.count > 1 ? parts[1] : nil) {
+                store.pairingError = nil; failedQR = nil // tap to try the same QR again
+            }
         }
         guard let name = linking else { return nil }
         let title = name.isEmpty ? String(localized: "Linking to your Android phone") : String(localized: "Linking to \(name)")
@@ -134,7 +146,7 @@ private struct CodeBoxes: View {
         .background {
             TextField("", text: $code)
                 .textInputAutocapitalization(.characters).autocorrectionDisabled().keyboardType(.asciiCapable)
-                .focused($focused).opacity(0.02)
+                .focused($focused).opacity(0.02).allowsHitTesting(false)
                 .onChange(of: code) {
                     let clean = String(code.uppercased().filter { $0.isLetter || $0.isNumber }.prefix(6))
                     if clean != code { code = clean }
@@ -155,8 +167,17 @@ struct StatusCard: View {
     var kind: Kind
     var title: String
     var detail: String?
+    var onTap: (() -> Void)? = nil
 
     var body: some View {
+        if let onTap {
+            Button(action: onTap) { card }.buttonStyle(.plain)
+        } else {
+            card
+        }
+    }
+
+    private var card: some View {
         let ink = kind == .working ? Palette.linkedInk : Palette.awayInk
         HStack(spacing: 12) {
             if kind == .working {

@@ -113,6 +113,9 @@ enum Fmt {
     /// A name inside other-direction text (a Latin phone name in Persian): first-strong isolate.
     static func isolate(_ s: String) -> String { "\u{2068}\(s)\u{2069}" }
 
+    /// A phone number inside right-to-left text: left-to-right isolate, so "+۹۸ ۹۱۲ …" keeps its order.
+    static func ltr(_ s: String) -> String { "\u{2066}\(s)\u{2069}" }
+
     static func initials(_ title: String) -> String {
         let words = title.split(separator: " ").filter { !$0.isEmpty }
         guard let first = words.first else { return "?" }

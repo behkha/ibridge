@@ -97,7 +97,7 @@ struct ContactsView: View {
 
     /// The five most recent named conversations.
     private var recents: [ThreadRow] {
-        Array(store.threads.filter { !$0.title.allSatisfy { $0.isNumber || $0 == "+" || $0 == " " } }.prefix(5))
+        Array(store.threads.filter { store.contactName(for: $0.addr) != nil || $0.last.name != nil }.prefix(5))
     }
 
     var body: some View {
@@ -141,7 +141,7 @@ struct ContactsView: View {
             .navigationDestination(for: Chat.self) { ConversationView(chat: $0) }
             .confirmationDialog(picking?.name ?? "", isPresented: Binding(get: { picking != nil }, set: { if !$0 { picking = nil } }), titleVisibility: .visible) {
                 ForEach(picking?.phones ?? [], id: \.n) { p in
-                    let title = (p.label.isEmpty ? "" : p.label + "  ") + Fmt.phone(p.n)
+                    let title = (p.label.isEmpty ? "" : p.label + "  ") + Fmt.ltr(Fmt.phone(p.n))
                     Button(title) { path = [Chat(thread: nil, addr: p.n)] }
                 }
             }

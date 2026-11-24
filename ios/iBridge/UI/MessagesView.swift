@@ -99,7 +99,7 @@ struct ConversationView: View {
         VStack(spacing: 0) {
             if case .outOfReach(let since) = store.link {
                 OutOfReachStrip(name: store.peerName, since: since,
-                                message: "\(store.peerName) is out of reach since \(Fmt.time(since)). Texts arrive when it’s back.")
+                                message: "\(Fmt.isolate(store.peerName)) is out of reach since \(Fmt.time(since)). Texts arrive when it’s back.")
                     .padding(.top, 4)
             }
             ScrollViewReader { proxy in
@@ -112,8 +112,10 @@ struct ConversationView: View {
                                 Text(Fmt.day(m.ts)).font(.app(12, .semibold)).foregroundStyle(Palette.secondary)
                                     .padding(.top, 8).padding(.bottom, 4)
                             }
-                            Bubble(message: m, lastInGroup: next.map { !Self.sameGroup(m, $0) } ?? true) {
+                            Bubble(message: m, lastInGroup: next.map { !Self.sameGroup(m, $0) } ?? true, canRetry: store.link == .linked) {
+                                // Resend; the new copy replaces the failed one here (Android keeps its own record).
                                 _ = central?.sendText(to: m.addr, body: m.body, sim: m.sim)
+                                store.messages[m.id] = nil
                             }
                             .id(m.id)
                         }
@@ -131,7 +133,7 @@ struct ConversationView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 2) {
-                    Text(Fmt.digits(title)).font(.app(16, .semibold)).foregroundStyle(Palette.ink).lineLimit(1)
+                    Text(title == Fmt.phone(addr) ? Fmt.ltr(title) : Fmt.digits(title)).font(.app(16, .semibold)).foregroundStyle(Palette.ink).lineLimit(1)
                     if title != Fmt.phone(addr) {
                         Text(Fmt.phone(addr)).font(.app(12)).foregroundStyle(Palette.secondary)
                             .environment(\.layoutDirection, .leftToRight)
@@ -151,9 +153,10 @@ struct ConversationView: View {
 
     private func composer(addr: String, sim: Int?, showSim: Bool) -> some View {
         let live = store.link == .linked
+        let away: Bool = { if case .outOfReach = store.link { return true }; return false }()
         let empty = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let placeholder: String = {
-            if case .outOfReach = store.link { return String(localized: "Sends when \(store.peerName) is back") }
+            if away { return String(localized: "\(Fmt.isolate(store.peerName)) is out of reach") }
             if showSim, let sim { return String(localized: "Text from SIM \(Fmt.digits(String(sim)))") }
             return String(localized: "Text")
         }()
@@ -163,7 +166,7 @@ struct ConversationView: View {
                 .padding(.horizontal, 14).padding(.vertical, 7)
                 .frame(minHeight: 36)
                 .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Palette.separator))
-                .disabled(!live)
+                .disabled(away)
             Button {
                 _ = central?.sendText(to: addr, body: draft, sim: sim) // reply on the SIM the conversation uses
                 draft = ""
@@ -185,6 +188,7 @@ struct ConversationView: View {
 private struct Bubble: View {
     var message: SMS
     var lastInGroup: Bool
+    var canRetry: Bool
     var retry: () -> Void
 
     var body: some View {
@@ -206,6 +210,7 @@ private struct Bubble: View {
                         .font(.app(13, .semibold)).foregroundStyle(Palette.missed)
                 }
                 .buttonStyle(.plain)
+                .disabled(!canRetry)
                 .padding(.horizontal, 6).padding(.bottom, 6)
             } else if lastInGroup {
                 Text(Fmt.time(m.ts)).font(.app(12)).foregroundStyle(Palette.secondary)
