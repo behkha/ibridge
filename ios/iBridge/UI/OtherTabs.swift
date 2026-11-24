@@ -40,9 +40,8 @@ struct KeypadView: View {
                         .padding(.horizontal, 30).frame(height: 56)
                         .background(Palette.accent, in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(FilledButtonStyle())
                 .disabled(number.count < 3)
-                .opacity(number.count < 3 ? 0.4 : 1)
                 .padding(.top, 22)
                 Spacer(minLength: 8)
             }
@@ -123,6 +122,7 @@ struct ContactsView: View {
                         .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 12)
                         .listRowInsets(EdgeInsets())
                         .listRowSeparatorTint(Palette.separator)
+                        .alignmentGuide(.listRowSeparatorLeading) { _ in 0 }
                     }
                     ForEach(rows) { c in
                         Button { open(c) } label: { ContactRow(contact: c) }
@@ -274,7 +274,7 @@ private struct PhoneCard: View {
     private var detail: String {
         if case .outOfReach(let since) = store.link { return String(localized: "Since \(Fmt.time(since)). Texts arrive when it’s back.") }
         guard let last = store.messages.values.map(\.ts).max() else { return String(localized: "Encrypted.") }
-        return String(localized: "Encrypted. Last text \(last.formatted(.relative(presentation: .named))).")
+        return String(localized: "Encrypted. Last text \(min(last, Date()).formatted(.relative(presentation: .named))).")
     }
 
     private func stat(_ value: String, _ label: LocalizedStringKey) -> some View {

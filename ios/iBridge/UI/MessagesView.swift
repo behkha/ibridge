@@ -135,7 +135,7 @@ struct ConversationView: View {
                 VStack(spacing: 2) {
                     Text(title == Fmt.phone(addr) ? Fmt.ltr(title) : Fmt.digits(title)).font(.app(16, .semibold)).foregroundStyle(Palette.ink).lineLimit(1)
                     if title != Fmt.phone(addr) {
-                        Text(Fmt.phone(addr)).font(.app(12)).foregroundStyle(Palette.secondary)
+                        Text(Fmt.phone(addr, localDigits: false)).font(.app(12)).foregroundStyle(Palette.secondary)
                             .environment(\.layoutDirection, .leftToRight)
                     }
                 }
@@ -203,7 +203,7 @@ private struct Bubble: View {
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(m.incoming ? Palette.field : Palette.accent, in: shape)
                 .opacity(m.incoming || m.state == "ok" ? 1 : 0.55)
-                .frame(maxWidth: 268, alignment: m.incoming ? .leading : .trailing)
+                .frame(maxWidth: 292, alignment: m.incoming ? .leading : .trailing)
             if m.state == "failed" && !m.incoming {
                 Button(action: retry) {
                     Label("Not sent. Tap to retry", systemImage: "exclamationmark.circle")

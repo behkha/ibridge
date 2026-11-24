@@ -79,7 +79,7 @@ fun PillButton(text: String, bg: Color, fg: Color, onClick: () -> Unit) {
         shape = RoundedCornerShape(20.dp),
         colors = ButtonDefaults.buttonColors(containerColor = bg, contentColor = fg),
         contentPadding = PaddingValues(horizontal = 16.dp),
-    ) { Text(text, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1) }
+    ) { Text(text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
 }
 
 /** The checklist row; also the warning row on the home screen. */
@@ -104,7 +104,7 @@ fun SetupRow(title: String, note: String, state: RowState, action: String?, onAc
             StrokeIcon(glyph, badgeFg)
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = C.ink)
+            Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = C.ink)
             Text(note, fontSize = 14.sp, lineHeight = 19.sp, color = if (warn) C.warnInk else C.muted)
         }
         if (action != null && state != RowState.DONE) {

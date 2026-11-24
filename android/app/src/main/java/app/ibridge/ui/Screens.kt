@@ -76,7 +76,7 @@ fun ChecklistScreen(rows: List<Row>, onAction: (Row) -> Unit, onPair: () -> Unit
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         Column(Modifier.padding(horizontal = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(stringResource(R.string.setup_title), fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Medium, color = C.ink)
+            Text(stringResource(R.string.setup_title), fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold, color = C.ink)
             Text(stringResource(R.string.setup_lede), fontSize = 15.sp, lineHeight = 22.sp, color = C.body)
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -94,7 +94,7 @@ fun ChecklistScreen(rows: List<Row>, onAction: (Row) -> Unit, onPair: () -> Unit
             modifier = Modifier.fillMaxWidth().height(56.dp),
             shape = RoundedCornerShape(28.dp),
             colors = ButtonDefaults.buttonColors(containerColor = C.accent, contentColor = Color.White),
-        ) { Text(stringResource(R.string.show_pairing_code), fontSize = 17.sp, fontWeight = FontWeight.Medium) }
+        ) { Text(stringResource(R.string.show_pairing_code), fontSize = 17.sp, fontWeight = FontWeight.SemiBold) }
     }
 }
 
@@ -150,7 +150,7 @@ fun PairingSheet(window: PairingWindow?, deviceName: String, onRenew: () -> Unit
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(R.string.pair_title), fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.Medium, color = C.ink)
+                Text(stringResource(R.string.pair_title), fontSize = 24.sp, lineHeight = 32.sp, fontWeight = FontWeight.SemiBold, color = C.ink)
                 Text(stringResource(R.string.pair_lede), fontSize = 15.sp, lineHeight = 22.sp, color = C.body)
             }
             if (window == null) {
@@ -180,7 +180,7 @@ fun PairingSheet(window: PairingWindow?, deviceName: String, onRenew: () -> Unit
                 }
             }
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                Text(stringResource(R.string.pair_back), fontSize = 16.sp, fontWeight = FontWeight.Medium, color = C.accent)
+                Text(stringResource(R.string.pair_back), fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = C.accent)
             }
         }
     }
@@ -203,7 +203,7 @@ fun HomeScreen(
             .verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text(stringResource(R.string.app_name), Modifier.padding(horizontal = 8.dp), fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Medium, color = C.ink)
+        Text(stringResource(R.string.app_name), Modifier.padding(horizontal = 8.dp), fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold, color = C.ink)
 
         val linked = ui.connected
         val cardBg = if (linked) C.linkedBg else C.grey
@@ -216,7 +216,7 @@ fun HomeScreen(
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(
                     stringResource(if (linked) R.string.home_linked else R.string.home_waiting, peerName),
-                    fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.Medium, color = cardInk,
+                    fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, color = cardInk,
                 )
                 val ctx = LocalContext.current
                 val detail = when {
@@ -266,8 +266,8 @@ fun HomeScreen(
 @Composable
 private fun Stat(value: String, label: String, ink: Color, modifier: Modifier) {
     Column(modifier.background(Color.White.copy(alpha = 0.7f), RoundedCornerShape(14.dp)).padding(horizontal = 12.dp, vertical = 10.dp)) {
-        Text(value, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = ink, maxLines = 1)
-        Text(label, fontSize = 13.sp, color = ink, maxLines = 1)
+        Text(value, fontSize = 20.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold, color = ink, maxLines = 1)
+        Text(label, fontSize = 13.sp, lineHeight = 16.sp, color = ink, maxLines = 1)
     }
 }
 

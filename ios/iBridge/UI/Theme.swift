@@ -83,7 +83,8 @@ enum Fmt {
     }
 
     /// "0912 111 0001" for an Iranian mobile typed locally, else the number as stored. Locale digits.
-    static func phone(_ n: String) -> String {
+    static func phone(_ n: String, localDigits: Bool = true) -> String {
+        let digits: (String) -> String = localDigits ? Fmt.digits : { $0 }
         let d = n.filter(\.isNumber)
         if n.allSatisfy({ $0.isNumber }), d.hasPrefix("09"), d.count > 4 {
             var parts = [String(d.prefix(4))]

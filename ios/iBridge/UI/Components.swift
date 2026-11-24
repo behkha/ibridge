@@ -176,6 +176,16 @@ struct OutOfReachStrip: View {
     }
 }
 
+/// Accent capsule whose disabled state is one 40% fade (a plain style dims the label a second time).
+struct FilledButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var enabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(enabled ? (configuration.isPressed ? 0.8 : 1) : 0.4)
+    }
+}
+
 struct Avatar: View {
     var title: String
     var tint: Color
@@ -194,7 +204,10 @@ extension Store {
     func tintColor(for addr: String, title: String) -> Color {
         if title.allSatisfy({ $0.isNumber || $0 == "+" || $0 == " " }) { return Palette.numberTint }
         // Read-only here: views must not write to the store. Colours are assigned when a text arrives.
-        let i = tints[addr] ?? addr.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
+        let digits = String(addr.filter(\.isNumber).suffix(9))
+        let i = tints[addr]
+            ?? (digits.count >= 6 ? tints.first { $0.key.filter(\.isNumber).hasSuffix(digits) }?.value : nil)
+            ?? digits.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
         return Palette.tints[i % Palette.tints.count]
     }
 }

@@ -19,6 +19,7 @@ struct PairingView: View {
         Group {
             if typing { codeEntry } else { viewfinder }
         }
+        .preferredColorScheme(typing ? .light : .dark) // light status bar over the camera
         .onChange(of: store.pairingError) { if store.pairingError != nil { failedQR = lastQR; linking = nil } }
         .onChange(of: store.link) { if store.link == .linked { dismiss() } }
     }
@@ -41,7 +42,7 @@ struct PairingView: View {
                 central?.pair(start)
             }
             .ignoresSafeArea()
-            Color.black.opacity(0.45).ignoresSafeArea().allowsHitTesting(false)
+            if hasCamera { Color.black.opacity(0.45).ignoresSafeArea().allowsHitTesting(false) }
             VStack(spacing: 0) {
                 HStack {
                     Button("Cancel", action: cancel)
@@ -97,9 +98,8 @@ struct PairingView: View {
                     Text("Pair").font(.app(17, .semibold)).foregroundStyle(.white)
                         .frame(maxWidth: .infinity).frame(height: 52).background(Palette.accent, in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(FilledButtonStyle())
                 .disabled(PairingStart.normalizeCode(code) == nil || linking != nil)
-                .opacity(PairingStart.normalizeCode(code) == nil || linking != nil ? 0.4 : 1)
                 if let card = statusCard { card }
             }
             .padding(.horizontal, 8).padding(.top, 24)
