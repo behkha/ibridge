@@ -8,7 +8,7 @@ Goal: our own iTell. Android holds the SIM; texts, contacts, calls and call aler
 - Android design: **Checklist**. Mockups: design/mockups/E-Checklist, E-QR (pairing sheet), F-Status (home).
   - A denied row turns orange without blocking the others, and the home screen reuses the list for warnings.
   - The QR is always black on white, expires with a countdown, and has a fallback code, LTR even in RTL.
-- Round 2 (2026-11-24, canvas page "Screens round 2"): pairing **Viewfinder**, conversation **Native**, Keypad **Text pad**, Contacts **Quick text**, Settings **Phone card**, Android away card **Quiet**. Liquid Glass: **system glass only** (CI on Xcode 26 so system tab bar/nav bars/sheets go glass; our buttons, composer, pairing controls stay flat as drawn). Sleek skill declined.
+- Round 2 (2026-11-24, built + verified; canvas page "Screens round 2"): pairing **Viewfinder**, conversation **Native**, Keypad **Text pad**, Contacts **Quick text**, Settings **Phone card**, Android away card **Quiet**. Liquid Glass: **system glass only** (CI on Xcode 26 so system tab bar/nav bars/sheets go glass; our buttons, composer, pairing controls stay flat as drawn). Sleek skill declined.
 - Toolchain install approved 2026-11-23. Devices: Android 12+ phone, iOS 17+ iPhone.
 ## Done
 - docs/PROTOCOL.md v1: GATT `e38d0001…`, chunk framing, QR + typed-code pairing (5×6-bit rounds, Android reveals first), triple-DH session, JSON messages.
@@ -30,7 +30,7 @@ Goal: our own iTell. Android holds the SIM; texts, contacts, calls and call aler
 - Phase-1 incoming call on iPhone = a notification (decline / text back), not CallKit, since there is no audio yet.
 - No unit tests (user rule). Verify by building and running on real devices/emulator/simulator.
 ## Next
-1. Round 2 built (iOS P1/C1/K1/N2/S1, Android W1), fresh-eyes review fixed (4 important), mockup comparison round 1 fixed; round 2 comparison pending. Not verified on the iPhone itself yet (needs a new .ipa via AltServer).
+1. Round 2 done 2026-11-24: shipped screens match the boards after 3 comparison rounds (evidence design/evidence/round2/). Left: install the new .ipa on the iPhone 17 (AltServer) and look at it there; 'N texts will follow' line not yet seen on the Galaxy (needs a text while away).
    - CI moves to runner macos-26 (Xcode 26.6, iOS 26.5 sims); deployment target stays iOS 17.
    - `-demo conversation|keypad|contacts|settings|pairing|pairing-code` screenshot these screens on CI.
 ## Open questions

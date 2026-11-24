@@ -47,7 +47,7 @@ $A shell dumpsys bluetooth_manager | grep -A1 mAdvertisingServiceUuids          
 - Who is scanning on the iPhone: `idevicesyslog | grep ScanParams` lists scan agents.
 
 ## 3. iOS (no Xcode here)
-Push to `main` of the private repo behkha/ibridge; `.github/workflows/build.yml` builds the Simulator app with XcodeGen and runs `scripts/ios-screenshots.sh` (Main, A-Calls, A-Persian, Conversation(-fa), Keypad, Contacts, Settings(-fa), Pairing(-code) via `-demo`). Runner macos-26 (Xcode 26, system Liquid Glass bars); compiler errors print in the Build step.
+Push to `main` of the public repo behkha/ibridge; `.github/workflows/build.yml` builds the Simulator app with XcodeGen and runs `scripts/ios-screenshots.sh` (Main, A-Calls, A-Persian, Conversation(-fa), Keypad, Contacts, Settings(-fa), Pairing(-code) via `-demo`). Runner macos-26 (Xcode 26, system Liquid Glass bars); compiler errors print in the Build step.
 ```bash
 gh run watch <id> --exit-status
 gh run download <id> -n ios-screenshots -D design/evidence/ios
