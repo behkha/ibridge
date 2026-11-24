@@ -96,10 +96,25 @@ final class Central: NSObject {
 
     // MARK: connection
 
-    /// Android's iBridge restarted on a radio link that stayed up: whatever session we hold is dead.
-    /// Drop it and connect again; the pause lets iOS finish the cancel before the new connect.
+    /// Android's iBridge restarted on a radio link that stayed up, so the session we hold is probably dead.
+    /// A session that answers a ping is already with the new run (we reconnected first) and stays.
+    /// Otherwise drop it and connect again; the pause lets iOS finish the cancel before the new connect.
+    /// Timers don't run while suspended, so this uses asyncAfter inside the wake's run time.
     private func rang() {
         guard store.peer != nil, pairing == nil else { return }
+        if handshake?.isLive == true, pingSentAt == nil, send(["t": "ping"]) {
+            pingSentAt = Date()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                guard let self, self.pingSentAt != nil else { return }
+                log.notice("doorbell: no pong; dropping the old session")
+                reconnect()
+            }
+            return
+        }
+        reconnect()
+    }
+
+    private func reconnect() {
         disconnect()
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.connectOrScan() }
     }
@@ -233,6 +248,7 @@ final class Central: NSObject {
                     && store.status?.perms["contacts"] == false
                 store.apply(m)
                 if contactsNowAllowed { refreshContacts() }
+                if m.str("t") == "unpair" { lastKnown = nil; doorbell?.update() }
             }
         }
     }

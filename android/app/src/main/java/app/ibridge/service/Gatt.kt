@@ -27,6 +27,7 @@ import app.ibridge.core.ProtocolException
 import java.util.ArrayDeque
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * GATT peripheral (PROTOCOL.md sections 1-2). All protocol work runs on one thread through [post],
@@ -234,21 +235,21 @@ class Gatt(
 
     private fun ring(d: BluetoothDevice) {
         val cb = object : BluetoothGattCallback() {
-            private var done = false
-            private fun finish(g: BluetoothGatt, what: String) {
-                if (done) return
-                done = true
+            private val done = AtomicBoolean(false)
+            fun finish(g: BluetoothGatt, what: String) {
+                if (!done.compareAndSet(false, true)) return
                 Log.i(TAG, "doorbell: $what")
                 g.disconnect() // releases only this app's use of the link; the iPhone's own connection stays
                 g.close()
             }
 
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
-                if (newState == BluetoothProfile.STATE_CONNECTED) g.discoverServices()
+                if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) g.discoverServices()
                 else finish(g, "link gone before ringing ($status)")
             }
 
             override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+                if (status != BluetoothGatt.GATT_SUCCESS) return finish(g, "discovery failed ($status)")
                 val wake = g.getService(Proto.DOORBELL)?.getCharacteristic(Proto.WAKE)
                     ?: return finish(g, "no doorbell on that device")
                 val type = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
@@ -265,7 +266,7 @@ class Gatt(
         }
         Log.i(TAG, "doorbell: ringing a device left on the link from an earlier run")
         val g = d.connectGatt(context, false, cb, BluetoothDevice.TRANSPORT_LE) ?: return
-        post(delayMs = 15_000) { g.close() } // never hold the link if the iPhone does not answer
+        post(delayMs = 15_000) { cb.finish(g, "timed out") } // never hold the link if the iPhone does not answer
     }
 
     private val callback = object : BluetoothGattServerCallback() {
@@ -296,6 +297,9 @@ class Gatt(
             if (descriptor.uuid == Proto.CCCD && descriptor.characteristic.uuid == Proto.TX) {
                 val on = value != null && value.isNotEmpty() && (value[0].toInt() and 1) == 1
                 if (!on) { if (d == device) subscribed = false; return@post }
+                // The iPhone subscribes once per connection. On a radio link that stayed up, Android never saw a
+                // disconnect, so a subscribe from the slot holder starts a new session: drop the old one's state.
+                if (d == device && subscribed) { Log.i(TAG, "central subscribed again; fresh session"); resetConnection() }
                 if (!claim(d)) { server?.cancelConnection(d); return@post } // one iPhone at a time
                 subscribed = true
                 pump()
