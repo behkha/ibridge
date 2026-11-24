@@ -22,7 +22,7 @@ struct RootView: View {
         .environment(\.symbolVariants, .none)
         .tint(Palette.accent)
         .fullScreenCover(isPresented: $pairing) { PairingView() }
-        .onAppear { if store.peer == nil && !store.isDemo { pairing = true } }
+        .onAppear { if store.peer == nil { pairing = true } } // demo: only the pairing scenarios have no peer
         .onChange(of: store.peer == nil) { _, unpaired in if unpaired && !store.isDemo { pairing = true } }
         .alert(store.alert ?? "", isPresented: Binding(get: { store.alert != nil }, set: { if !$0 { store.alert = nil } })) {
             Button("OK", role: .cancel) {}

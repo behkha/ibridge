@@ -1,13 +1,15 @@
 import Foundation
 
-/// Launch arguments `-demo messages|calls-offline` fill the store with the mockups' content, for CI screenshots.
+/// Launch arguments `-demo <scenario>` fill the store with the mockups' content, for CI screenshots.
+/// Scenarios: messages, calls-offline, conversation, keypad, contacts, settings, pairing, pairing-code.
 /// No Bluetooth, no persistence.
 enum Demo {
     struct Scenario { var name: String; var tab: Int }
 
     static func scenario() -> Scenario? {
         guard let name = UserDefaults.standard.string(forKey: "demo") else { return nil }
-        return Scenario(name: name, tab: name.hasPrefix("calls") ? 1 : 0)
+        let tabs = ["calls": 1, "keypad": 2, "contacts": 3, "settings": 4]
+        return Scenario(name: name, tab: tabs.first { name.hasPrefix($0.key) }?.value ?? 0)
     }
 
     @MainActor
@@ -63,6 +65,37 @@ enum Demo {
                                            ts: ts.addingTimeInterval(Double(-i * 60)), dur: 0, sim: sim)
             }
         }
+        // Earlier turns of the Sara thread, for the conversation screen.
+        let sara: [(String, Date, String)] = fa ? [
+            ("in", today(13, 52), "سلام، کلیدها رو برات میارم. خونه‌ای؟"),
+            ("out", today(13, 58), "آره، بیا بالا، طبقه چهارم"),
+            ("out", today(14, 1), "رسیدی پیام بده"),
+        ] : [
+            ("in", today(13, 52), "Hi, I’m bringing the keys over. Are you home?"),
+            ("out", today(13, 58), "Yes, come up, 4th floor"),
+            ("out", today(14, 1), "Text me when you’re here"),
+        ]
+        for (dir, ts, body) in sara {
+            n += 1
+            store.messages["\(n)"] = SMS(id: "\(n)", thread: "+989121110001", addr: "+989121110001", name: fa ? "سارا احمدی" : "Sara Ahmadi",
+                                         body: body, ts: ts, dir: dir, read: true, sim: 2, state: "ok")
+        }
+
+        store.contacts = (fa ? [
+            ("سارا احمدی", "+98 912 111 0001"), ("رضا کریمی", "+98 912 111 0003"), ("مامان", "+98 912 111 0002"),
+            ("ندا جعفری", "+98 912 111 0005"), ("مطب دکتر مرادی", "+98 21 8820 4410"),
+        ] : [
+            ("Sara Ahmadi", "+98 912 111 0001"), ("Reza Karimi", "+98 912 111 0003"), ("Mom", "+98 912 111 0002"),
+            ("Neda Jafari", "+98 912 111 0005"), ("Dr. Moradi Clinic", "+98 21 8820 4410"), ("Ali Rostami", "+98 935 220 1187"),
+            ("Behnaz Tehrani", "+98 912 404 7719"), ("Courier", "+98 912 111 0004"), ("Farid Nouri", "+98 919 553 0042"),
+            ("Golnar Sadeghi", "+98 912 870 3321"), ("Hamid Bahrami", "+98 935 118 9020"),
+        ]).enumerated().map { i, c in Contact(id: "c\(i)", name: c.0, phones: [.init(n: c.1, label: "mobile")]) }
+        store.status = PhoneStatus(battery: 82, charging: false,
+                                   sims: [.init(sim: 1, carrier: "Irancell", signal: 3), .init(sim: 2, carrier: "MCI", signal: 4)],
+                                   perms: [:], name: "Pixel 8a")
+
         store.link = s.name.hasSuffix("offline") ? .outOfReach(since: today(14, 2)) : .linked
+        if s.name == "conversation" { store.demoThread = "+989121110001" }
+        if s.name.hasPrefix("pairing") { store.peer = nil; store.link = .unpaired }
     }
 }

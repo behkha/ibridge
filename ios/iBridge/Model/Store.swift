@@ -26,6 +26,8 @@ final class Store {
     var alert: String?
 
     var isDemo = false
+    /// Demo only: the conversation to open on launch.
+    var demoThread: String?
 
     // MARK: derived
 

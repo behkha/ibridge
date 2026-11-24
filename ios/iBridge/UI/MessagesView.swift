@@ -4,6 +4,7 @@ struct MessagesView: View {
     @Environment(Store.self) private var store
     var onPill: () -> Void
     @State private var query = ""
+    @State private var path: [String] = []
 
     private var rows: [ThreadRow] {
         let q = query.trimmingCharacters(in: .whitespaces)
@@ -12,7 +13,7 @@ struct MessagesView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             VStack(spacing: 0) {
                 TabHeader(title: "Messages", onPill: onPill) { SearchField(text: $query) }
                 if case .outOfReach(let since) = store.link {
@@ -33,6 +34,7 @@ struct MessagesView: View {
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: String.self) { ConversationView(thread: $0) }
         }
+        .onAppear { if let t = store.demoThread, path.isEmpty { path = [t] } }
     }
 }
 

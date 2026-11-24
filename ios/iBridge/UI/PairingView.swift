@@ -6,7 +6,7 @@ struct PairingView: View {
     @Environment(Store.self) private var store
     @Environment(\.central) private var central
     @Environment(\.dismiss) private var dismiss
-    @State private var typing = false
+    @State private var typing = Demo.scenario()?.name == "pairing-code"
     @State private var code = ""
     @State private var waiting = false
 
