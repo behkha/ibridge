@@ -44,6 +44,7 @@ $A shell dumpsys bluetooth_manager | grep -A1 mAdvertisingServiceUuids          
 - Expect `leftover link: held, now released`, then `← hello` within ~10 s; the iPhone shows `link lost; app state background` then `live`. Android only releases the link of the iPhone saved in `shared_prefs/gatt.xml` (set when a session goes live): a fresh install has none until the first link.
 - Text back: call the Android SIM, press and hold the alert on the iPhone, Text back; Android logs `← call.decline`, `← send`, `→ sent`.
 - Wait for `← hello` in `$A logcat -s iBridge`; message types are logged as → / ←.
+- Logic checks (PROTOCOL §6 "While the link is down"): with the iPhone's Bluetooth off, Android logs `(not sent: no live link)` and the home card reads `Away since HH:mm. N text(s) will follow…`; on relink expect `← hello`, `→ status`, then the held `sms.read` / `sms.gone` / `contacts.changed`, then `page`s, then the iPhone's queued `← send` / `← read`. iPhone reads need `appops set app.ibridge.android WRITE_SMS allow` (user OK given for the Galaxy) to log `marked N of N texts read`. Google Messages deletes go to its bin first; `sms.gone` comes when the bin is emptied.
 - Who is scanning on the iPhone: `idevicesyslog | grep ScanParams` lists scan agents.
 
 ## 3. iOS (no Xcode here)

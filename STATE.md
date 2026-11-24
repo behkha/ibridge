@@ -29,12 +29,10 @@ Goal: our own iTell. Android holds the SIM; texts, contacts, calls and call aler
 - Phase-1 incoming call on iPhone = a notification (decline / text back), not CallKit, since there is no audio yet.
 - No unit tests (user rule). Verify by building and running on real devices/emulator/simulator.
 ## Next (user, 2026-11-24: focus on app logic; polish and redesign later)
-1. Logic audit + fixes, end to end on the real phones. Known gaps:
-   - iPhone never marks texts read: unread badges never clear, Android's read state never changes (no `read` message in PROTOCOL §6).
-   - No send while out of reach: composer locks; no queue on iPhone to send on reconnect.
-   - Read/delete on Android never reach the iPhone (sms re-pushed only on pending→ok/failed).
-   - New Android contacts only arrive on pull-to-refresh or a perms change.
-   - "N texts will follow" (Android away card) and catch-up sync after reconnect not yet seen on the phones.
+1. Logic audit done 2026-11-24 (PROTOCOL §6 "While the link is down", "Read state"); verified on both phones except the missed-call alert (needs a call from another phone). Ratings: side-session notes logic-audit.md.
+   - New: iPhone outbox (send while away, read marks), read both ways (`read`, `sms.read`), `sms.gone`, `contacts.changed`, ring re-sent on relink, missed-call alert from the call log.
+   - Galaxy: WRITE_SMS app-op set to allow (user OK) so iPhone reads mark Android texts read. Default SMS app there is Google Messages; its bin keeps deleted texts until emptied.
+   - Left (rated < 5): unlink on iPhone while away leaves Android waiting; call-log deletions not mirrored; changes lost if the link drops mid-push.
 2. Later polish: unused Persian keys; per-keystroke recompute in conversation. Real-data screenshots stay out of the (public) repo.
 ## Open questions
 - Paid Apple account would allow TestFlight (7-day free signing is fine for now).
