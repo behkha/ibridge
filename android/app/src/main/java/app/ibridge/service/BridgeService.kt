@@ -26,6 +26,7 @@ import android.telephony.SmsManager
 import android.util.Log
 import app.ibridge.MainActivity
 import app.ibridge.R
+import app.ibridge.call.CallAudio
 import app.ibridge.core.Link
 import app.ibridge.core.LinkEngine
 import app.ibridge.core.Pairing
@@ -43,6 +44,7 @@ import org.json.JSONObject
 class BridgeService : Service() {
     private lateinit var phone: Phone
     private lateinit var gatt: Gatt
+    private lateinit var relay: CallRelay
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val observerThread = HandlerThread("ibridge-observers").apply { start() }
     private val observerHandler = Handler(observerThread.looper)
@@ -66,7 +68,8 @@ class BridgeService : Service() {
         Link.init(this)
         phone = Phone(this)
         startInForeground()
-        gatt = Gatt(this, ::engineFor) { Link.setConnected(false); keepRecent() }
+        gatt = Gatt(this, ::engineFor) { Link.setConnected(false); keepRecent(); relay.onLinkDown() }
+        relay = CallRelay(this, gatt, phone, ::push) { sendStatus(force = true) }
         gatt.start()
         registerObservers()
         registerReceiver(stateReceiver, IntentFilter().apply {
@@ -78,6 +81,13 @@ class BridgeService : Service() {
         scope.launch { calls.collect { gatt.post { onCallEvent(it) } } }
         scope.launch { Pairing.window.collect { gatt.setFastAdvertising(it != null) } }
         Link.setSignal(phone.signalLevel())
+        CallAudio.init(this)
+        CallAudio.listener = relay
+        CallAudio.kick("service start")
+        // Debug builds only: `am broadcast -a app.ibridge.DEBUG_PAIR --es code 123456` stands in for the notification reply.
+        if (app.ibridge.BuildConfig.DEBUG) registerReceiver(object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) { i.getStringExtra("code")?.let { CallAudio.pair(it) } }
+        }, IntentFilter("app.ibridge.DEBUG_PAIR"), RECEIVER_EXPORTED)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -132,6 +142,7 @@ class BridgeService : Service() {
         send = send,
         onLive = { Link.setConnected(true); linkLive() },
         onMessage = ::onMessage,
+        onAudio = { relay.onAudio(it) },
     )
 
     /** Sends one message to the iPhone. Logs its type and id only, never its content. */
@@ -145,7 +156,7 @@ class BridgeService : Service() {
     private fun onMessage(m: JSONObject) {
         Log.i(TAG, "← ${m.optString("t")} ${m.optString("kind", m.optString("call"))}")
         when (m.optString("t")) {
-            "hello" -> { keepRecent(); sendStatus(force = true); catchUp() }
+            "hello" -> { keepRecent(); sendStatus(force = true); catchUp(); relay.onHello(); if (ringMsg != null) silenceRinger() }
             "read" -> {
                 val ids = m.optJSONArray("ids")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).toLongOrNull() } }.orEmpty()
                 Log.i(TAG, "marked ${phone.markRead(ids)} of ${ids.size} texts read")
@@ -154,6 +165,11 @@ class BridgeService : Service() {
             "sync" -> sync(m)
             "send" -> sendText(m)
             "call.decline" -> declineCall(m.optString("call"))
+            "call.answer" -> if (relay.answer(m, ringing, ringMsg)) { ringing = null; ringMsg = null } // OFFHOOK is not "answered on A"
+            "call.dial" -> relay.dial(m)
+            "call.hangup" -> relay.hangup(m)
+            "call.dtmf" -> relay.dtmf(m)
+            "bench" -> relay.bench(m)
             "unpair" -> {
                 Link.setPeer(null)
                 gatt.stop(); gatt.start()
@@ -176,7 +192,7 @@ class BridgeService : Service() {
         val now = System.currentTimeMillis()
         val perms = perms()
         if (!force && now - lastStatusAt < 30_000 && perms.toString() == lastPerms) return
-        if (push(phone.status(deviceName(this), perms))) { lastStatusAt = now; lastPerms = perms.toString() }
+        if (push(phone.status(deviceName(this), perms).put("audio", CallAudio.state.wire))) { lastStatusAt = now; lastPerms = perms.toString() }
     }
 
     /** Right after `status`: what changed while the iPhone was away. New texts and calls come by cursor sync. */
@@ -251,7 +267,8 @@ class BridgeService : Service() {
         var bytes = 0
         for (item in items.take(limit)) {
             val size = item.toString().toByteArray().size
-            if (page.isNotEmpty() && bytes + size > PAGE_BYTES) break
+            // While a call's audio flows, a page holds the link for at most a few connection events (PROTOCOL.md 8).
+            if (page.isNotEmpty() && bytes + size > if (relay.active) AUDIO_PAGE_BYTES else PAGE_BYTES) break
             page += item
             bytes += size
         }
@@ -444,10 +461,21 @@ class BridgeService : Service() {
                     .putOpt("name", phone.nameFor(number)).put("sim", e.subId?.let { phone.slotForSubscription(it) } ?: 1)
                     .put("ts", System.currentTimeMillis())
                 push(ringMsg!!)
+                silenceRinger()
             }
             "OFFHOOK" -> ringing?.let { (id, _) -> push(JSONObject().put("t", "call.end").put("call", id).put("how", "answered")); ringing = null; ringMsg = null }
             "IDLE" -> ringing?.let { (id, _) -> push(JSONObject().put("t", "call.end").put("call", id).put("how", "missed")); ringing = null; ringMsg = null }
         }
+    }
+
+    /**
+     * The iPhone rings with CallKit while the call can move there, so the Galaxy goes quiet (setting `silence_ringer`,
+     * on unless turned off). Only while the iPhone is live and audio is ready.
+     */
+    private fun silenceRinger() {
+        if (gatt.engine?.isLive != true || CallAudio.state != app.ibridge.call.AudioState.READY) return
+        if (!getSharedPreferences("calls", MODE_PRIVATE).getBoolean("silence_ringer", true)) return
+        if (CallAudio.command(JSONObject().put("c", "silence"))) Log.i(TAG, "ringer silenced: the call rings on the iPhone")
     }
 
     private val stateReceiver = object : BroadcastReceiver() {
@@ -455,7 +483,7 @@ class BridgeService : Service() {
             when (i.action) {
                 BluetoothAdapter.ACTION_STATE_CHANGED -> when (i.getIntExtra(BluetoothAdapter.EXTRA_STATE, 0)) {
                     BluetoothAdapter.STATE_ON -> gatt.start()
-                    BluetoothAdapter.STATE_TURNING_OFF -> { gatt.post { keepRecent() }; gatt.stop(); Link.setConnected(false) }
+                    BluetoothAdapter.STATE_TURNING_OFF -> { gatt.post { keepRecent(); relay.onLinkDown() }; gatt.stop(); Link.setConnected(false) }
                 }
                 else -> gatt.post { sendStatus() }
             }
@@ -469,6 +497,7 @@ class BridgeService : Service() {
         const val CHANNEL = "link"
         const val ACTION_UNLINK = "app.ibridge.UNLINK"
         const val PAGE_BYTES = 40_000
+        const val AUDIO_PAGE_BYTES = 4_000
         /** Away keys sent as id lists after `hello`, and their message types. */
         val AWAY_IDS = listOf("read" to "sms.read", "gone" to "sms.gone", "callsGone" to "calls.gone")
 

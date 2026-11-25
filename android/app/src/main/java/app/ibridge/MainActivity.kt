@@ -33,10 +33,14 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.ibridge.call.AudioBlock
+import app.ibridge.call.CallAudio
 import app.ibridge.core.Link
 import app.ibridge.core.Pairing
 import app.ibridge.service.BridgeService
 import app.ibridge.ui.C
+import app.ibridge.ui.CallsRow
+import app.ibridge.ui.CallsSheet
 import app.ibridge.ui.ChecklistScreen
 import app.ibridge.ui.HomeScreen
 import app.ibridge.ui.Item
@@ -56,6 +60,7 @@ class MainActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.light(android.graphics.Color.TRANSPARENT, android.graphics.Color.TRANSPARENT),
         )
         Link.init(this)
+        CallAudio.init(this)
         BridgeService.start(this)
         setContent {
             MaterialTheme(colorScheme = lightColorScheme(primary = C.accent, background = C.bg, surface = C.bg)) {
@@ -80,12 +85,34 @@ class MainActivity : ComponentActivity() {
         Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.fromParts("package", packageName, null))
     )
 
+    /** Straight to Wireless debugging where Settings allows it (highlighted in Developer options), else About phone. */
+    private fun openWirelessDebugging() {
+        val dev = Settings.Global.getInt(contentResolver, Settings.Global.DEVELOPMENT_SETTINGS_ENABLED, 0) == 1
+        val key = ":settings:fragment_args_key"
+        val intent = if (dev) Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+            .putExtra(key, "toggle_adb_wireless").putExtra(":settings:show_fragment_args", Bundle().apply { putString(key, "toggle_adb_wireless") })
+        else Intent(Settings.ACTION_DEVICE_INFO_SETTINGS)
+        runCatching { startActivity(intent) }.onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
+    }
+
+    private fun openCallsFix(block: AudioBlock) {
+        val intent = when (block) {
+            AudioBlock.NEEDS_WIFI -> Intent(Settings.Panel.ACTION_WIFI)
+            AudioBlock.AUTO_BLOCKER -> Intent(Settings.ACTION_SECURITY_SETTINGS) // Security and privacy › Auto Blocker on Samsung
+            else -> return
+        }
+        runCatching { startActivity(intent) }.onFailure { startActivity(Intent(Settings.ACTION_SETTINGS)) }
+    }
+
     private fun bluetoothOn() = getSystemService(BluetoothManager::class.java).adapter?.isEnabled == true
 
     @Composable
     private fun App() {
         val ui by Link.ui.collectAsStateWithLifecycle()
         val window by Pairing.window.collectAsStateWithLifecycle()
+        val audio by CallAudio.ui.collectAsStateWithLifecycle()
+        var callsSheet by rememberSaveable { mutableStateOf(false) }
+        val callsRow: @Composable () -> Unit = { CallsRow(audio, onSetup = { callsSheet = true }, onWarning = ::openCallsFix) }
         val tick = resumes.intValue
         var permissionTick by remember { mutableIntStateOf(0) }
         val rows = remember(tick, permissionTick) { Setup.rows(this) }
@@ -141,7 +168,7 @@ class MainActivity : ComponentActivity() {
         BackHandler(enabled = showChecklist && ui.peer != null) { showChecklist = false }
 
         if (ui.peer == null || showChecklist) {
-            ChecklistScreen(rows, onAction = ::act, onPair = ::pair)
+            ChecklistScreen(rows, onAction = ::act, onPair = ::pair, calls = callsRow)
         } else {
             HomeScreen(
                 ui = ui,
@@ -150,6 +177,7 @@ class MainActivity : ComponentActivity() {
                 onPermissions = { showChecklist = true },
                 onPairAnother = ::pair,
                 onUnlink = { confirmUnlink = true },
+                calls = callsRow,
             )
         }
 
@@ -161,6 +189,8 @@ class MainActivity : ComponentActivity() {
                 onDismiss = { sheetOpen = false; Pairing.close() },
             )
         }
+
+        if (callsSheet) CallsSheet(audio, onOpenSettings = ::openWirelessDebugging, onDismiss = { callsSheet = false })
 
         if (confirmUnlink) {
             val name = ui.peer?.name ?: ""

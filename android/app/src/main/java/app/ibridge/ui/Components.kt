@@ -51,12 +51,18 @@ object C {
     val warnInk = Color(0xFF7A3E00)
     val warnBorder = Color(0xFFF2C9A0)
     val danger = Color(0xFFC4001A)
+    val offerBg = Color(0xFFEAF0FC)
+    val offerBorder = Color(0xFFBFD0F4)
+    val step = Color(0xFF5B6472)
 }
 
 object Glyph {
     const val CHECK = "M5 12.5l4.5 4.5L19 7.5"
     const val DOT = "M12 12h.01"
     const val WARN = "M12 7v6M12 16.5h.01"
+    const val CROSS = "M6 6l12 12M18 6L6 18"
+    // Arc flags spelled out: PathParser misreads packed ones such as "006.6".
+    const val PHONE = "M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25 11.4 11.4 0 0 0 3.6.57 1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1z"
 }
 
 /** Draws a 24-unit stroked path at [size]. */
@@ -86,11 +92,12 @@ fun PillButton(text: String, bg: Color, fg: Color, onClick: () -> Unit) {
 @Composable
 fun SetupRow(title: String, note: String, state: RowState, action: String?, onAction: () -> Unit) {
     val warn = state == RowState.DENIED
+    val border = when (state) { RowState.DENIED -> C.warnBorder; RowState.OFFER -> C.offerBorder; else -> C.border }
     Row(
         Modifier
             .fillMaxWidth()
             .background(C.card, RoundedCornerShape(18.dp))
-            .border(1.dp, if (warn) C.warnBorder else C.border, RoundedCornerShape(18.dp))
+            .border(1.dp, border, RoundedCornerShape(18.dp))
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -99,15 +106,17 @@ fun SetupRow(title: String, note: String, state: RowState, action: String?, onAc
             RowState.DONE -> Triple(C.linkedBg, C.linked, Glyph.CHECK)
             RowState.TODO -> Triple(C.grey, C.greyFg, Glyph.DOT)
             RowState.DENIED -> Triple(C.warnBg, C.warn, Glyph.WARN)
+            RowState.OFFER -> Triple(C.offerBg, C.accent, Glyph.PHONE)
+            RowState.INFO -> Triple(C.grey, C.step, Glyph.CROSS)
         }
         Box(Modifier.size(40.dp).background(badgeBg, CircleShape), contentAlignment = Alignment.Center) {
-            StrokeIcon(glyph, badgeFg)
+            StrokeIcon(glyph, badgeFg, width = if (state == RowState.OFFER) 2f else 2.2f)
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = C.ink)
             Text(note, fontSize = 14.sp, lineHeight = 19.sp, color = if (warn) C.warnInk else C.muted)
         }
-        if (action != null && state != RowState.DONE) {
+        if (action != null && state != RowState.DONE && state != RowState.INFO) {
             if (warn) PillButton(action, C.warnBg, C.warnInk, onAction) else PillButton(action, C.accent, Color.White, onAction)
         }
     }

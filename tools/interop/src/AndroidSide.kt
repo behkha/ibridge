@@ -38,6 +38,9 @@ fun main(args: Array<String>) {
         output.flush()
     }
     lateinit var engine: LinkEngine
+    // `bench` (PROTOCOL.md 6): n AUDIO records of stream 0 out, then count the iPhone's n back and answer bench.done.
+    var benchExpect = 0
+    var benchGot = 0
     engine = LinkEngine("Pixel 8a", identity, peers, { System.err.println("ANDROID $it") }, ::send,
         onLive = { System.err.println("ANDROID live") },
         onMessage = { m ->
@@ -48,6 +51,21 @@ fun main(args: Array<String>) {
                     JSONObject().put("t", "page").put("kind", "sms").put("more", false).put("cursor", "9|0")
                         .put("items", List(40) { JSONObject().put("id", "$it").put("addr", "+98912").put("body", "سلام ".repeat(30)).put("ts", 1) })
                 )
+                "bench" -> {
+                    benchExpect = m.optInt("n"); benchGot = 0
+                    repeat(benchExpect) { i ->
+                        val plain = ByteArray(3 + m.optInt("size", 60)).also { it[1] = (i shr 8).toByte(); it[2] = i.toByte() }
+                        // Skip every third counter: the receiver must accept any counter above the last (PROTOCOL.md 5.1).
+                        if (i % 3 == 2) engine.sealAudio(plain)
+                        send(engine.sealAudio(plain)!!)
+                    }
+                }
+            }
+        },
+        onAudio = { plain ->
+            if (plain[0].toInt() == 0 && benchExpect > 0 && ++benchGot == benchExpect) {
+                engine.sendMessage(JSONObject().put("t", "bench.done").put("n", benchGot).put("ms", 0))
+                benchExpect = 0
             }
         })
     try {

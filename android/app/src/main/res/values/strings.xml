@@ -78,4 +78,31 @@
     <string name="unlink_body">It stops getting texts and calls from this phone until you pair it again.</string>
     <string name="unlink_confirm">Unlink</string>
     <string name="cancel">Cancel</string>
+
+    <!-- P2-Calls: calls on the iPhone -->
+    <string name="calls_row">Talk on your iPhone</string>
+    <string name="calls_row_note">Answer and place calls there</string>
+    <string name="calls_row_action">Set up</string>
+    <string name="calls_sheet_title">Talk on your iPhone</string>
+    <string name="calls_step_dev">Turn on Developer options</string>
+    <string name="calls_step_dev_note">Tap Build number seven times.</string>
+    <string name="calls_step_dev_done">Developer options are on</string>
+    <string name="calls_step_wireless">Turn on Wireless debugging</string>
+    <string name="calls_step_wireless_note">Settings › Developer options › Wireless debugging. Wi-Fi must be on.</string>
+    <string name="calls_step_pair">Tap “Pair device with pairing code”</string>
+    <string name="calls_step_code">Type the code into iBridge’s notification</string>
+    <string name="calls_step_code_note">Pull down the notifications without leaving Settings.</string>
+    <string name="calls_open_wireless">Open Wireless debugging</string>
+    <string name="channel_pairing">Pairing code</string>
+    <string name="pair_code_title">Pairing code</string>
+    <string name="pair_code_text">Type the 6 digits shown under “Pair with device”.</string>
+    <string name="pair_code_wrong">That code didn’t work</string>
+    <string name="pair_code_wrong_text">Tap “Pair device with pairing code” again and type the new code.</string>
+    <string name="warn_calls_wifi">Calls stay on this phone</string>
+    <string name="warn_calls_wifi_note">Turn on Wi-Fi once so iBridge can start after the restart.</string>
+    <string name="warn_calls_wifi_action">Wi-Fi</string>
+    <string name="warn_calls_blocker">Auto Blocker is on</string>
+    <string name="warn_calls_blocker_note">It turns off Wireless debugging, so calls stay on this phone.</string>
+    <string name="warn_calls_unsupported">Calls can’t move to the iPhone</string>
+    <string name="warn_calls_unsupported_note">This phone’s software doesn’t allow it. Alerts still arrive.</string>
 </resources>

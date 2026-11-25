@@ -22,6 +22,7 @@ object Proto {
     const val SESSION_HELLO: Byte = 0x10
     const val SESSION_ACCEPT: Byte = 0x11
     const val DATA: Byte = 0x20
+    const val AUDIO: Byte = 0x21
     const val ERROR: Byte = 0x7F
 
     const val MODE_QR: Byte = 0x01

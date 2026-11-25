@@ -64,8 +64,18 @@ class Gatt(
     private var mtu = 23
     private var deframer = Deframer()
     private var framer = Framer()
+    /** Whole packets waiting; split into chunks only when they start, so an `AUDIO` packet can go first (PROTOCOL.md 2). */
     private val outbox = ArrayDeque<ByteArray>()
+    /** Plain `AUDIO` frames waiting, at most [AUDIO_QUEUE]; sealed when they start, so dropped ones use no counter. */
+    private val audioOut = ArrayDeque<ByteArray>()
+    /** Chunks of the packet being sent. */
+    private val chunks = ArrayDeque<ByteArray>()
     private var inFlight = false
+    /** Pulled when no audio frame waits, for the debug `bench`: lets it send as fast as flow control allows. */
+    var audioSource: (() -> ByteArray?)? = null
+    var audioDropped = 0L
+        private set
+    val audioQueued get() = audioOut.size
     var engine: LinkEngine? = null
         private set
 
@@ -159,14 +169,33 @@ class Gatt(
     /** Queues one packet for the connected iPhone. Call on [worker]. */
     fun sendPacket(packet: ByteArray) {
         if (device == null) return
-        framer.split(packet, mtu - 3).forEach { outbox.add(it) }
+        outbox.add(packet)
         pump()
+    }
+
+    /** Queues one `AUDIO` plaintext ahead of other packets; keeps the newest [AUDIO_QUEUE]. Call on [worker]. */
+    fun sendAudio(plain: ByteArray) {
+        if (device == null || engine?.isLive != true) return
+        audioOut.add(plain)
+        while (audioOut.size > AUDIO_QUEUE) { audioOut.removeFirst(); audioDropped++ }
+        pump()
+    }
+
+    /** Wakes the pump after [audioSource] got something to send. */
+    fun kick() = pump()
+
+    private fun nextPacket(): ByteArray? {
+        val e = engine
+        val audio = audioOut.poll() ?: audioSource?.invoke()
+        if (audio != null && e != null) e.sealAudio(audio)?.let { return it }
+        return outbox.poll()
     }
 
     private fun pump() {
         if (inFlight || !subscribed) return
         val d = device ?: return
-        val chunk = outbox.poll() ?: return
+        if (chunks.isEmpty()) nextPacket()?.let { chunks.addAll(framer.split(it, mtu - 3)) }
+        val chunk = chunks.poll() ?: return
         inFlight = true
         val ok = if (Build.VERSION.SDK_INT >= 33) {
             server?.notifyCharacteristicChanged(d, tx, false, chunk) == BluetoothGatt.GATT_SUCCESS
@@ -203,6 +232,9 @@ class Gatt(
         deframer = Deframer()
         framer = Framer()
         outbox.clear()
+        audioOut.clear()
+        chunks.clear()
+        audioSource = null
         inFlight = false
         engine = null
     }
@@ -330,5 +362,9 @@ class Gatt(
         }
     }
 
-    companion object { const val TAG = "iBridge" }
+    companion object {
+        const val TAG = "iBridge"
+        /** PROTOCOL.md 8: a sender that falls behind keeps at most 3 frames and drops the oldest. */
+        const val AUDIO_QUEUE = 3
+    }
 }

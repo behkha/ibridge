@@ -55,6 +55,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.CompositionLocalProvider
 import app.ibridge.R
+import app.ibridge.call.AudioBlock
+import app.ibridge.call.AudioState
+import app.ibridge.call.AudioUi
+import app.ibridge.call.CallAudio
+import app.ibridge.call.PairStep
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import app.ibridge.core.Identity
 import app.ibridge.core.LinkUi
 import app.ibridge.core.P256
@@ -69,7 +78,7 @@ import java.net.URLEncoder
 // ---------------------------------------------------------------- E-Checklist
 
 @Composable
-fun ChecklistScreen(rows: List<Row>, onAction: (Row) -> Unit, onPair: () -> Unit) {
+fun ChecklistScreen(rows: List<Row>, onAction: (Row) -> Unit, onPair: () -> Unit, calls: @Composable () -> Unit = {}) {
     Column(
         Modifier.fillMaxSize().background(C.bg).statusBarsPadding().navigationBarsPadding()
             .padding(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 24.dp),
@@ -88,6 +97,7 @@ fun ChecklistScreen(rows: List<Row>, onAction: (Row) -> Unit, onPair: () -> Unit
                 }
                 SetupRow(stringResource(r.item.title), note, r.state, action) { onAction(r) }
             }
+            calls()
         }
         Button(
             onClick = onPair,
@@ -196,6 +206,7 @@ fun HomeScreen(
     onPermissions: () -> Unit,
     onPairAnother: () -> Unit,
     onUnlink: () -> Unit,
+    calls: @Composable () -> Unit = {},
 ) {
     val peerName = ui.peer?.name ?: ""
     Column(
@@ -251,6 +262,7 @@ fun HomeScreen(
             val action = if (r.state == RowState.DENIED && !r.askAgain) stringResource(R.string.action_settings) else stringResource(r.item.action)
             SetupRow(stringResource(r.item.warnTitle), stringResource(r.item.warnNote), RowState.DENIED, action) { onWarning(r) }
         }
+        calls()
 
         Column(Modifier.fillMaxWidth().background(C.card, RoundedCornerShape(18.dp)).border(1.dp, C.border, RoundedCornerShape(18.dp))) {
             MenuRow(stringResource(R.string.menu_permissions), C.ink, onPermissions)
@@ -275,5 +287,91 @@ private fun Stat(value: String, label: String, ink: Color, modifier: Modifier) {
 private fun MenuRow(text: String, color: Color, onClick: () -> Unit) {
     Box(Modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick).padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
         Text(text, fontSize = 16.sp, color = color)
+    }
+}
+
+// ---------------------------------------------------------------- P2-Calls
+
+/** The home row while calls are not set up, or the warning while calls would fall back to alerts. Null: nothing to show. */
+@Composable
+fun CallsRow(ui: AudioUi, onSetup: () -> Unit, onWarning: (AudioBlock) -> Unit) {
+    when {
+        ui.state == AudioState.SETUP ->
+            SetupRow(stringResource(R.string.calls_row), stringResource(R.string.calls_row_note), RowState.OFFER, stringResource(R.string.calls_row_action), onSetup)
+        ui.block == AudioBlock.NEEDS_WIFI ->
+            SetupRow(stringResource(R.string.warn_calls_wifi), stringResource(R.string.warn_calls_wifi_note), RowState.DENIED, stringResource(R.string.warn_calls_wifi_action)) { onWarning(ui.block) }
+        ui.block == AudioBlock.AUTO_BLOCKER ->
+            SetupRow(stringResource(R.string.warn_calls_blocker), stringResource(R.string.warn_calls_blocker_note), RowState.DENIED, stringResource(R.string.action_settings)) { onWarning(ui.block) }
+        ui.block == AudioBlock.UNSUPPORTED ->
+            SetupRow(stringResource(R.string.warn_calls_unsupported), stringResource(R.string.warn_calls_unsupported_note), RowState.INFO, null) {}
+    }
+}
+
+private class Step(val title: String, val note: String?, val done: Boolean)
+
+/** "Talk on your iPhone": live steps that tick themselves, one button. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CallsSheet(ui: AudioUi, onOpenSettings: () -> Unit, onDismiss: () -> Unit) {
+    val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val paired = ui.pair == PairStep.DONE || ui.state != AudioState.SETUP
+    DisposableEffect(Unit) {
+        CallAudio.beginSetup()
+        onDispose { CallAudio.endSetup() }
+    }
+    // Developer options step: shown only when they were off as the sheet opened.
+    val devWasOff = rememberSaveable { mutableStateOf(!CallAudio.adb.developerOptionsOn) }
+    LaunchedEffect(paired, ui.state) { if (paired && ui.state == AudioState.READY) { delay(1200); onDismiss() } }
+
+    val steps = buildList {
+        if (devWasOff.value) add(
+            if (ui.developerOptions) Step(stringResource(R.string.calls_step_dev_done), null, true)
+            else Step(stringResource(R.string.calls_step_dev), stringResource(R.string.calls_step_dev_note), false)
+        )
+        add(Step(stringResource(R.string.calls_step_wireless), stringResource(R.string.calls_step_wireless_note), paired || ui.wireless))
+        add(Step(stringResource(R.string.calls_step_pair), null, paired || ui.pairingScreen))
+        add(Step(stringResource(R.string.calls_step_code), stringResource(R.string.calls_step_code_note), paired))
+    }
+    val current = steps.indexOfFirst { !it.done }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = state,
+        containerColor = Color.White,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        dragHandle = { Box(Modifier.padding(top = 14.dp).size(36.dp, 4.dp).background(C.handle, RoundedCornerShape(2.dp))) },
+    ) {
+        Column(
+            Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 20.dp, end = 20.dp, top = 14.dp, bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Text(stringResource(R.string.calls_sheet_title), fontSize = 22.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold, color = C.ink)
+            steps.forEachIndexed { i, s -> StepRow(i + 1, s, now = i == current) }
+            Button(
+                onClick = onOpenSettings,
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(24.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = C.accent, contentColor = Color.White),
+            ) { Text(stringResource(R.string.calls_open_wireless), fontSize = 16.sp, fontWeight = FontWeight.SemiBold) }
+        }
+    }
+}
+
+@Composable
+private fun StepRow(n: Int, s: Step, now: Boolean) {
+    Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
+        val (bg, fg) = when {
+            s.done -> C.linked to Color.White
+            now -> C.accent to Color.White
+            else -> C.grey to C.step
+        }
+        Box(Modifier.size(30.dp).background(bg, CircleShape), contentAlignment = Alignment.Center) {
+            if (s.done) StrokeIcon(Glyph.CHECK, fg, size = 16, width = 2.6f)
+            else Text(n.toString(), fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fg)
+        }
+        Column(Modifier.weight(1f).padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(s.title, fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.SemiBold, color = C.ink)
+            if (!s.done) s.note?.let { Text(it, fontSize = 14.sp, lineHeight = 19.sp, color = C.step) }
+        }
     }
 }

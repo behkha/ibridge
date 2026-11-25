@@ -51,7 +51,8 @@ enum class Item(
     ),
 }
 
-enum class RowState { DONE, TODO, DENIED }
+/** OFFER: a blue row inviting an optional setup (calls on the iPhone). INFO: grey, nothing to do. */
+enum class RowState { DONE, TODO, DENIED, OFFER, INFO }
 
 data class Row(val item: Item, val state: RowState, val askAgain: Boolean)
 

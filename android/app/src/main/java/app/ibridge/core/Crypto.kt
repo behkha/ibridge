@@ -125,38 +125,65 @@ class SoftwareKey(private val pair: KeyPair = P256.ephemeral()) : StaticKey {
     override fun agree(peer: PublicKey) = P256.ecdh(pair.private, peer)
 }
 
-/** AES-256-GCM records with strict per-direction counters (PROTOCOL.md 5.1). */
+/**
+ * AES-256-GCM records (PROTOCOL.md 5.1). `DATA` counters are strict: the next one or the session ends.
+ * `AUDIO` records have their own counters and nonce label, and the receiver takes any counter above the
+ * last one it accepted, since a sender may drop frames before sealing them.
+ */
 class RecordCipher(private val sendKey: ByteArray, private val recvKey: ByteArray) {
     private var sendCounter = 0L
     private var recvCounter = 0L
+    private var audioSendCounter = 0L
+    private var audioRecvLast = -1L
 
     private fun nonce(dir: String, counter: Long) =
         ascii(dir) + byteArrayOf(0) + ByteBuffer.allocate(8).putLong(counter).array()
 
-    fun seal(plain: ByteArray): ByteArray {
-        if (sendCounter == 1L shl 32) throw ProtocolException(ErrorCode.BAD_PACKET, "rekey needed")
-        val counter = sendCounter++
-        val header = byteArrayOf(Proto.DATA) + ByteBuffer.allocate(8).putLong(counter).array()
+    private fun sealRecord(type: Byte, dir: String, counter: Long, plain: ByteArray): ByteArray {
+        val header = byteArrayOf(type) + ByteBuffer.allocate(8).putLong(counter).array()
         val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(sendKey, "AES"), GCMParameterSpec(128, nonce("a2i", counter)))
+        c.init(Cipher.ENCRYPT_MODE, SecretKeySpec(sendKey, "AES"), GCMParameterSpec(128, nonce(dir, counter)))
         c.updateAAD(header)
         return header + c.doFinal(plain)
     }
 
-    /** Returns the plaintext, or throws: any replay, gap or bad tag ends the session. */
-    fun open(packet: ByteArray): ByteArray {
-        if (packet.size < 1 + 8 + 16) throw ProtocolException(ErrorCode.BAD_PACKET, "short record")
-        val counter = ByteBuffer.wrap(packet, 1, 8).long
-        if (counter != recvCounter) throw ProtocolException(ErrorCode.BAD_PACKET, "counter $counter, expected $recvCounter")
+    private fun openRecord(packet: ByteArray, dir: String, counter: Long): ByteArray {
         val c = Cipher.getInstance("AES/GCM/NoPadding")
-        c.init(Cipher.DECRYPT_MODE, SecretKeySpec(recvKey, "AES"), GCMParameterSpec(128, nonce("i2a", counter)))
+        c.init(Cipher.DECRYPT_MODE, SecretKeySpec(recvKey, "AES"), GCMParameterSpec(128, nonce(dir, counter)))
         c.updateAAD(packet, 0, 9)
-        val plain = try {
+        return try {
             c.doFinal(packet, 9, packet.size - 9)
         } catch (e: Exception) {
             throw ProtocolException(ErrorCode.BAD_PACKET, "bad tag")
         }
-        recvCounter++
-        return plain
+    }
+
+    private fun counterOf(packet: ByteArray): Long {
+        if (packet.size < 1 + 8 + 16) throw ProtocolException(ErrorCode.BAD_PACKET, "short record")
+        return ByteBuffer.wrap(packet, 1, 8).long
+    }
+
+    fun seal(plain: ByteArray): ByteArray {
+        if (sendCounter == 1L shl 32) throw ProtocolException(ErrorCode.BAD_PACKET, "rekey needed")
+        return sealRecord(Proto.DATA, "a2i", sendCounter++, plain)
+    }
+
+    /** Returns the plaintext, or throws: any replay, gap or bad tag ends the session. */
+    fun open(packet: ByteArray): ByteArray {
+        val counter = counterOf(packet)
+        if (counter != recvCounter) throw ProtocolException(ErrorCode.BAD_PACKET, "counter $counter, expected $recvCounter")
+        return openRecord(packet, "i2a", counter).also { recvCounter++ }
+    }
+
+    fun sealAudio(plain: ByteArray): ByteArray {
+        if (audioSendCounter == 1L shl 32) throw ProtocolException(ErrorCode.BAD_PACKET, "rekey needed")
+        return sealRecord(Proto.AUDIO, "A2I", audioSendCounter++, plain)
+    }
+
+    /** Any counter above the last accepted one; a repeat, an older one or a bad tag ends the session. */
+    fun openAudio(packet: ByteArray): ByteArray {
+        val counter = counterOf(packet)
+        if (counter <= audioRecvLast) throw ProtocolException(ErrorCode.BAD_PACKET, "audio counter $counter after $audioRecvLast")
+        return openRecord(packet, "I2A", counter).also { audioRecvLast = counter }
     }
 }

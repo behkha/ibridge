@@ -44,7 +44,9 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
+    // BouncyCastle (Kadb's pairing certificates) ships the same OSGi/version manifests in several jars.
+    packaging { resources { excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF", "META-INF/DEPENDENCIES") } }
 }
 
 dependencies {
@@ -58,4 +60,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.google.zxing:core:3.5.3")
+    // Own ADB client for Wireless debugging (pairing + shell), to start the call-audio helper. Apache-2.0.
+    implementation("com.flyfishxu:kadb:1.3.0")
 }

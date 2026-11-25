@@ -164,7 +164,7 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 | `send` | `req` (client id), `to`, `body`, `sim`? | `sent` |
 | `read` | `ids`: [sms ids] | — (A marks them read where Android lets it, see "Read state") |
 | `call.decline` | `call` | `call.end` |
-| `call.answer` | `call` | `call.state` `active` and audio (section 8), or `call.end` if it no longer rings |
+| `call.answer` | `call` | `call.state` `active` and audio (section 8); `call.end` `ended` if it no longer rings, `failed` if A cannot relay it |
 | `call.dial` | `req` (client id), `to`, `sim`? | `call.state` `dialing` with `req`, then audio; `call.end` `failed` with `req` if it could not be placed |
 | `call.hangup` | `call` | `call.end` `ended` |
 | `call.dtmf` | `call`, `digit` (`0-9 * #`) | — (A plays the tone into the call, 160 ms) |
@@ -185,7 +185,7 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 | `call` | `id`, `addr`, `name`?, `kind`: `in` \| `out` \| `missed` \| `rejected`, `ts`, `dur` (s), `sim` | each new call-log row |
 | `calls.gone` | `ids`: [call ids] | call-log rows deleted on A (by the user or Android's own trimming); I deletes them |
 | `call.ring` | `call` (event id), `addr`, `name`?, `sim`, `ts` | an incoming call starts ringing, and again after `hello` while it still rings |
-| `call.end` | `call`, `how`: `answered` \| `missed` \| `declined` \| `ended` \| `failed`, `req`? | that call stops ringing (`missed` also covers a call declined on A; the `call` row's `kind` tells them apart, and I alerts on `kind: missed`); `answered` means answered **on A**. For a relayed call (section 8): `ended` when it ends on either side, `failed` when a `call.dial` could not be placed |
+| `call.end` | `call`, `how`: `answered` \| `missed` \| `declined` \| `ended` \| `failed`, `req`? | that call stops ringing (`missed` also covers a call declined on A; the `call` row's `kind` tells them apart, and I alerts on `kind: missed`); `answered` means answered **on A**. For a relayed call (section 8): `ended` when it ends on either side, `failed` when a `call.dial` could not be placed or a `call.answer` could not be relayed |
 | `call.state` | `call`, `state`: `dialing` \| `alerting` \| `active` \| `held`, `dir`: `in` \| `out`, `addr`, `name`?, `sim`, `stream` (1–255), `req`? (echoes `call.dial`) | each state change of a relayed call (section 8), and again after `hello` while it lasts |
 | `bench.done` | `n`, `ms` | debug: A received I's `n` bench records in `ms` |
 | `contacts.changed` | — | A's contacts changed (checked at most every 10 s); I re-syncs contacts from `null` |
@@ -248,7 +248,7 @@ A missing `audio` means `setup`. A sends a new `status` as soon as `audio` chang
 ```
 stream(1) || seq(2) || opus(1 .. 400)
 ```
-- `stream`: the relayed call, from `call.state` (A picks 1–255, a new one per call). `0` is the debug `bench` stream. A receiver drops frames of any other stream.
+- `stream`: the relayed call, from `call.state` (A picks 1–255, a new one per call). `0` is the debug `bench` stream. Because `AUDIO` goes ahead of queued `DATA`, the first frames of a call can arrive before its `call.state`: I, while it has a relayed call whose stream it does not know yet, takes the stream of the first nonzero-stream frame. Otherwise a receiver drops frames of any other stream.
 - `seq`: per stream and direction, +1 per 20 ms frame, wraps at 65 536. A gap means the sender dropped frames; the receiver conceals them.
 - `opus`: one Opus packet, 16 kHz mono, 20 ms, VBR ~24 kbit/s, no FEC (GATT is lossless), no DTX.
 

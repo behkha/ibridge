@@ -23,6 +23,8 @@ class LinkEngine(
     private val send: (ByteArray) -> Unit,
     private val onLive: () -> Unit,
     private val onMessage: (JSONObject) -> Unit,
+    /** The plaintext of each `AUDIO` record (PROTOCOL.md 8): stream(1) || seq(2) || opus. */
+    private val onAudio: (ByteArray) -> Unit = {},
 ) {
     private sealed interface Step
     private data object Idle : Step
@@ -54,6 +56,10 @@ class LinkEngine(
             Proto.PAIR_PROOF -> pairProof(body)
             Proto.SESSION_HELLO -> sessionHello(body)
             Proto.DATA -> data(p)
+            Proto.AUDIO -> {
+                val live = step as? Live ?: throw ProtocolException(ErrorCode.BAD_PACKET, "AUDIO before session")
+                onAudio(live.cipher.openAudio(p))
+            }
             Proto.ERROR -> throw ProtocolException(ErrorCode.BAD_PACKET, "peer error ${body.firstOrNull()}")
             else -> throw ProtocolException(ErrorCode.BAD_PACKET, "unknown type ${p[0]}")
         }
@@ -80,6 +86,12 @@ class LinkEngine(
         send(live.cipher.seal(plain))
         return true
     }
+
+    /**
+     * Seals one `AUDIO` record, or null when no live session exists. The transport seals at the moment it
+     * sends, so frames it drops from its queue never use a counter.
+     */
+    fun sealAudio(plain: ByteArray): ByteArray? = (step as? Live)?.cipher?.sealAudio(plain)
 
     // ---- pairing ----
 
