@@ -151,15 +151,15 @@ object CallHelper {
                         Wire.PCM -> Relay.up(f.payload)
                     }
                 }
-            } catch (e: Exception) {
-                if (open) log("client read: ${e.javaClass.simpleName} ${e.message}")
+            } catch (e: Throwable) {
+                if (open) Log.w(TAG, "helper: client read failed", e)
             }
             close("closed")
         }
 
         fun send(type: Int, payload: ByteArray) {
             if (!open) return
-            try { synchronized(out) { Wire.write(out, type, payload) } } catch (e: Exception) { close("write failed") }
+            try { synchronized(out) { Wire.write(out, type, payload) } } catch (e: Exception) { if (open) Log.w(TAG, "helper: write failed", e); close("write failed") }
         }
 
         fun close(why: String) {
@@ -463,7 +463,7 @@ object CallHelper {
          * Paced by the call's clock: each blocking write takes the next frame from iBridge, or silence. Frames come over
          * Bluetooth in bursts, so this is a small jitter buffer: after running dry it waits for [upPrime] frames, and
          * when the queue held more than [upSpare] frames beyond the one due for 1 s (clock drift, a burst after a stall)
-         * it drops that many, each at a quiet frame or within half a second.
+         * it drops that many, each at a quiet frame or within half a second. After running dry it trims nothing for 10 s.
          * The track's own buffer is cut to [trackFrames], so the sound written waits there no longer than that.
          */
         private fun upLoop(t: AudioTrack, g: Int) {
@@ -474,6 +474,7 @@ object CallHelper {
             var n = 0
             var excess = 0
             var excessWait = 0
+            var holdOff = 0 // frames left before trimming may start again after running dry
             var written = 0L
             val ts = android.media.AudioTimestamp()
             try {
@@ -482,11 +483,12 @@ object CallHelper {
                 while (live(g)) {
                     val frame = synchronized(upQueue) {
                         val size = upQueue.size
-                        if (size == 0) { primed = false; excess = 0 } else if (size >= upPrime) primed = true
+                        if (size == 0) { if (primed) holdOff = 500; primed = false; excess = 0 } else if (size >= upPrime) primed = true
+                        if (holdOff > 0) holdOff--
                         lowest = minOf(lowest, size)
                         upDepth.add(size)
                         if (++n >= 50) {
-                            if (excess == 0 && lowest > upSpare + 1) { excess = lowest - upSpare - 1; excessWait = 0 }
+                            if (excess == 0 && holdOff == 0 && lowest > upSpare + 1) { excess = lowest - upSpare - 1; excessWait = 0 }
                             n = 0; lowest = Int.MAX_VALUE
                         }
                         if (excess > 0 && upQueue.size > 1 && (quiet(upQueue.first()) || ++excessWait > 25)) {

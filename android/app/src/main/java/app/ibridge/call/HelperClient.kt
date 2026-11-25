@@ -52,14 +52,14 @@ class HelperClient(
     private fun readLoop() {
         try {
             while (true) {
-                val f = Wire.read(input) ?: break
+                val f = Wire.read(input) ?: run { if (open) Log.i(TAG, "helper socket: the helper closed it"); null } ?: break
                 when (f.type) {
                     Wire.JSON -> onEvent(JSONObject(String(f.payload)))
                     Wire.PCM -> onPcm(f.payload)
                 }
             }
-        } catch (e: Exception) {
-            if (open) Log.i(TAG, "helper socket: ${e.javaClass.simpleName}")
+        } catch (e: Throwable) {
+            if (open) Log.w(TAG, "helper socket: read failed", e)
         }
         close()
     }
@@ -70,7 +70,10 @@ class HelperClient(
 
     private fun write(type: Int, payload: ByteArray): Boolean {
         if (!open) return false
-        return try { synchronized(out) { Wire.write(out, type, payload) }; true } catch (e: Exception) { close(); false }
+        return try { synchronized(out) { Wire.write(out, type, payload) }; true } catch (e: Exception) {
+            if (open) Log.w(TAG, "helper socket: write failed on ${Thread.currentThread().name}", e)
+            close(); false
+        }
     }
 
     fun close() {

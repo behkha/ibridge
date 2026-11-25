@@ -43,7 +43,12 @@ class HelperCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == app.ibridge.call.helper.Wire.PROOF_ACTION) { app.ibridge.call.CallAudio.proved(intent.getStringExtra("n")); return }
         if (intent.action == "app.ibridge.OPUS_CHECK") { resultData = app.ibridge.call.opusRoundTrip(); return }
-        if (intent.action == "app.ibridge.AUDIO_TUNE") { resultData = tune(intent); return }
+        if (intent.action == "app.ibridge.AUDIO_TUNE") {
+            // Off the main thread: writing to the helper's socket here throws NetworkOnMainThreadException, which closes it.
+            val pending = goAsync()
+            Thread({ pending.resultData = tune(intent); pending.finish() }, "ibridge-tune").start()
+            return
+        }
         app.ibridge.call.CallAudio.init(context)
         resultData = app.ibridge.call.CallAudio.launchCommand()
     }

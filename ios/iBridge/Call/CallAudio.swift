@@ -340,7 +340,8 @@ final class MicRing: @unchecked Sendable {
 /// with a short fade, and keeps itself as shallow as the link allows: a frame that is late is waited for (the buffer grows
 /// by one), and when for 1 s there were always more than `spare` frames left after each take, that many extra frames are
 /// dropped, each at a quiet moment (or within half a second). So a burst after a link stall is gone in a second or two,
-/// and clock drift is absorbed the same way.
+/// and clock drift is absorbed the same way. After running dry it trims nothing for 10 s, so it settles at the depth the
+/// sender's bursts need instead of trimming into the next gap.
 /// `push`, `reset`, `tune` and `takeStats` from the receive queue or main, `render` from the real-time thread. Frames live in
 /// slots allocated once; the lock is held for at most one call's worth of samples and fixed-size frame copies, never
 /// around an allocation, a free or a decode.
@@ -417,6 +418,8 @@ final class JitterBuffer: @unchecked Sendable {
         var takes = 0
         var trim = 0
         var trimWait = 0
+        /// Takes left before trimming may start again after the buffer ran dry.
+        var holdOff = 0
         var depthN = 0, depthSum = 0, depthMin = Int.max, depthMax = 0
 
         init() {
@@ -435,7 +438,7 @@ final class JitterBuffer: @unchecked Sendable {
             head = 0; count = 0; stats = Stats(); next = 0; playing = false
             cur.update(repeating: 0, count: Self.len); pos = 0; fade = false
             hasLast = false; missRun = 0; lateRun = 0
-            windowMin = .max; takes = 0; trim = 0; trimWait = 0
+            windowMin = .max; takes = 0; trim = 0; trimWait = 0; holdOff = 0
             depthN = 0; depthSum = 0; depthMin = .max; depthMax = 0
         }
 
@@ -534,8 +537,9 @@ final class JitterBuffer: @unchecked Sendable {
             if skip { next &+= 1 }
             stats.concealed += 1
             missRun += 1
-            windowMin = 0 // the buffer ran dry: no trimming in this window
+            windowMin = 0 // the buffer ran dry: no trimming for a while
             trim = 0
+            holdOff = 500
             if missRun > 10 { playing = false }
             if missRun == 1, hasLast {
                 fade = true
@@ -550,9 +554,10 @@ final class JitterBuffer: @unchecked Sendable {
             depthN += 1; depthSum += count; depthMin = min(depthMin, count); depthMax = max(depthMax, count)
             windowMin = min(windowMin, count)
             if trim > 0 { trimWait += 1 }
+            if holdOff > 0 { holdOff -= 1 }
             takes += 1
             guard takes >= 50 else { return }
-            if trim == 0, windowMin > spare { trim = windowMin - spare; trimWait = 0 }
+            if trim == 0, holdOff == 0, windowMin > spare { trim = windowMin - spare; trimWait = 0 }
             takes = 0
             windowMin = .max
         }
