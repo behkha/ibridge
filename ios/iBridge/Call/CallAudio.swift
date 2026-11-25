@@ -376,12 +376,14 @@ final class JitterBuffer: @unchecked Sendable {
 
     /// The counters since the last call; `depth` is the frames left after each take, min/avg/max.
     func takeStats() -> Stats {
-        state.withLockUnchecked { s in
+        // Numbers out under the lock, text built after it: the render thread waits on this lock.
+        let t = state.withLockUnchecked { s in
             defer { s.stats = .init(); s.depthN = 0; s.depthSum = 0; s.depthMin = .max; s.depthMax = 0 }
-            var r = s.stats
-            if s.depthN > 0 { r.depth = "\(s.depthMin)/\(String(format: "%.1f", Double(s.depthSum) / Double(s.depthN)))/\(s.depthMax)" }
-            return r
+            return (stats: s.stats, n: s.depthN, sum: s.depthSum, lo: s.depthMin, hi: s.depthMax)
         }
+        var r = t.stats
+        if t.n > 0 { r.depth = "\(t.lo)/\(String(format: "%.1f", Double(t.sum) / Double(t.n)))/\(t.hi)" }
+        return r
     }
 
     /// Under -40 dBFS.
@@ -511,7 +513,7 @@ final class JitterBuffer: @unchecked Sendable {
                 head = (head + 1) % Self.slots
                 count -= 1
                 next = seq &+ 1
-                if trim > 0, count > 0, quiet[slot] || trimWait > 25 { // ahead: skip one frame, quietly if it can
+                if trim > 0, count > spare, quiet[slot] || trimWait > 25 { // ahead: skip one frame, quietly if it can
                     trim -= 1
                     trimWait = 0
                     stats.trimmed += 1

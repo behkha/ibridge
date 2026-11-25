@@ -237,13 +237,16 @@ class Gatt(
             post { stopAdvertising(); prefs.edit().putString("iphone", d.address).apply() }
         })
         Log.i(TAG, "central claimed the link")
+        // A relayed call outlived a relink (PROTOCOL.md 8 keeps it 20 s): ask for the short interval on the new link too.
+        if (fastLink && linkClient == null) linkClient = d.connectGatt(context, false, linkCallback, BluetoothDevice.TRANSPORT_LE)
         post(delayMs = 20_000) { if (device == d && engine?.isLive != true) { Log.w(TAG, "no session in 20 s"); drop(d) } }
         return true
     }
 
+    /** Leaves the link client alone: a fresh session on the same link (a repeat subscribe) must not let the link drop. */
     private fun resetConnection() {
-        closeLinkClient()
         engine?.close()
+        intervalMs = 0.0
         device = null
         subscribed = false
         mtu = 23
@@ -354,6 +357,7 @@ class Gatt(
         override fun onConnectionStateChange(d: BluetoothDevice, status: Int, newState: Int) = post {
             if (newState == BluetoothProfile.STATE_DISCONNECTED && d == device) {
                 Log.i(TAG, "central disconnected")
+                closeLinkClient()
                 resetConnection()
                 onDisconnected()
                 unlinkedSince = System.currentTimeMillis()

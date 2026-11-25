@@ -80,3 +80,27 @@ amirwmr/tether (Galaxy A54 notes: same API on Exynos, not tried on a real PSTN c
   | iPhone → caller | ~0.70 s (5 of 10 sounds agree; rough) | 0.36 s | ~0.35 s |
 - Known contributors to cut next: helper AudioTrack queue (~120 ms), helper uplink jitter queue (2–5 frames), iPhone
   jitter buffer (3–5 frames), MediaCodec Opus batching, BLE connection interval (iOS default 30 ms).
+
+## Latency cut (2026-11-25, four real calls, per-stage timing on both phones)
+Each phone logs once a second how long every stage held the sound (`relay …: … | lag encode … queue … sent … decode …`
+on Android, `audio: … depth … | gap …, lag mic … send … decode …` on the iPhone). Final call, 127 s, averages:
+| Stage | Caller → iPhone | iPhone → caller |
+| --- | --- | --- |
+| framing (one 20 ms frame) | 20 ms | 20 ms (+ 7 ms in the mic ring) |
+| Opus on Android (MediaCodec) | 9 ms encode | 6 ms decode |
+| link queue + notify / iPhone send | 4 ms | < 1 ms |
+| BLE, 15 ms interval | ~8 ms | ~8 ms |
+| receiver's buffer | iPhone jitter 2.8 frames ≈ 55 ms + the frame playing | helper queue ~1.9 frames ≈ 38 ms |
+| output | iPhone I/O 7.5 ms | helper track **72 ms** (one frame written ahead; the path adds ~50 ms) |
+| **iBridge adds (sum)** | **~115 ms** (was ~400) | **~150 ms** (was ~350) |
+- What moved it: a 15 ms connection interval during calls (Android opens a GATT client on the iPhone's link and asks for
+  CONNECTION_PRIORITY_HIGH; iOS grants 15 ms, its default is 30 ms); the helper track cut to one frame (two frames 98 ms;
+  half a frame starved it, underruns on every write); codecs waited for 2 ms and left most packets a frame late, now up to
+  12 ms; jitter buffers on both sides start at 2 frames, drop excess within a second, and hold off 10 s after running dry.
+- Left: the downlink arrives in 40–70 ms bursts (the call's capture, not BLE), and the link stalls 90–140 ms every 30 s
+  or so: those give ~1 concealed frame per 20 s on the iPhone and ~1 silent frame per 15 s at the caller. Covering them
+  would cost their length in delay.
+- Not measured mouth-to-ear (the user preferred real conversations to test sounds); the sums leave out the network and
+  the phones' own call paths, which a normal call has too. Users: "works great".
+- Gotcha: unplugging or replugging USB restarts adbd on the Galaxy, which kills the helper and ends a relayed call.
+  "Revoke USB debugging authorizations" also revokes iBridge's Wireless debugging pairing (set up again from the app).

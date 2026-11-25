@@ -59,8 +59,11 @@ object CallHelper {
     @Volatile private var upPrime = 2
     /** Frames the uplink keeps in hand: when the queue held more than this beyond the frame due for 1 s, the extra go. */
     @Volatile private var upSpare = 1
-    /** Samples the uplink track may hold ahead of the call (its play-out buffer); the HAL may round it up. */
-    @Volatile private var trackFrames = Wire.FRAME * 2
+    /**
+     * Samples the uplink track may hold ahead of the call. One frame (20 ms) measured 72 ms from write to the call (the
+     * path itself adds ~50 ms), two frames 98 ms; half a frame starved it (underruns every write). Tunable (`tune`).
+     */
+    @Volatile private var trackFrames = Wire.FRAME
 
     private var appUid = -1
     private var build = ""
@@ -491,7 +494,7 @@ object CallHelper {
                             if (excess == 0 && holdOff == 0 && lowest > upSpare + 1) { excess = lowest - upSpare - 1; excessWait = 0 }
                             n = 0; lowest = Int.MAX_VALUE
                         }
-                        if (excess > 0 && upQueue.size > 1 && (quiet(upQueue.first()) || ++excessWait > 25)) {
+                        if (excess > 0 && upQueue.size > upSpare + 1 && (quiet(upQueue.first()) || ++excessWait > 25)) {
                             upQueue.removeFirst(); upDropped.incrementAndGet(); excess--; excessWait = 0
                         }
                         if (primed) upQueue.pollFirst() else null

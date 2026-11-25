@@ -87,7 +87,7 @@ class Relay(private val stream: Int, private val send: (plain: ByteArray, queued
 
     companion object {
         const val TAG = "iBridge"
-        /** Frames waiting for a codec before the oldest is dropped. */
-        const val QUEUE = 3
+        /** Frames waiting for a codec before the oldest is dropped: room for the burst while a codec starts (~90 ms). */
+        const val QUEUE = 6
     }
 }
