@@ -54,7 +54,9 @@ object CallHelper {
     private const val USAGE_CALL_ASSISTANT = 17
     private const val STREAM_VOICE_CALL = 0
     /** Uplink frames waiting for the call's clock; older ones are dropped (the iPhone side buffers the jitter). */
-    private const val UP_QUEUE = 3
+    private const val UP_QUEUE = 8
+    /** Frames the uplink waits for after running dry (40 ms): absorbs Bluetooth bursts. */
+    private const val UP_TARGET = 2
 
     private var appUid = -1
     private var build = ""
@@ -438,13 +440,29 @@ object CallHelper {
             } catch (e: Throwable) { if (live(g)) fail(g, "downlink: ${cause(e)}") }
         }
 
-        /** Paced by the call's clock: each blocking write takes the next frame from iBridge, or silence. */
+        /**
+         * Paced by the call's clock: each blocking write takes the next frame from iBridge, or silence. Frames come over
+         * Bluetooth in bursts, so this is a small jitter buffer: after running dry it waits for [UP_TARGET] frames, and
+         * when the queue never fell below [UP_TARGET] + 1 for 2 s (clock drift, a burst) it drops one frame.
+         */
         private fun upLoop(t: AudioTrack, g: Int) {
             val pcm = ShortArray(Wire.FRAME)
+            var primed = false
+            var lowest = Int.MAX_VALUE
+            var n = 0
             try {
                 t.play()
                 while (live(g)) {
-                    val frame = synchronized(upQueue) { upQueue.pollFirst() }
+                    val frame = synchronized(upQueue) {
+                        val size = upQueue.size
+                        if (size == 0) primed = false else if (size >= UP_TARGET) primed = true
+                        lowest = minOf(lowest, size)
+                        if (++n >= 100) {
+                            if (lowest > UP_TARGET && upQueue.size > 0) { upQueue.removeFirst(); upDropped.incrementAndGet() }
+                            n = 0; lowest = Int.MAX_VALUE
+                        }
+                        if (primed) upQueue.pollFirst() else null
+                    }
                     if (frame != null) { ByteBuffer.wrap(frame).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(pcm); up.incrementAndGet() }
                     else { pcm.fill(0); silent.incrementAndGet() }
                     mixDtmf(pcm)

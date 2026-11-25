@@ -20,7 +20,7 @@ import java.io.IOException
 object Wire {
     const val PORT = 38_217
     /** Bump when the commands or events change: iBridge restarts a helper that answers another version. */
-    const val VERSION = 2
+    const val VERSION = 3
     const val PACKAGE = "app.ibridge.android"
     const val SHELL_UID = 2000
     /** The helper's proof that it runs as the shell: this broadcast, carrying iBridge's nonce, reaches only a DUMP holder's sender. */
