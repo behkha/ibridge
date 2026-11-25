@@ -171,9 +171,18 @@ final class CallManager: NSObject {
     // MARK: audio
 
     /// One `AUDIO` plaintext of a call: `stream(1) || seq(2) || opus`. Other streams are dropped.
+    /// Audio passes queued `DATA`, so a call's first frames can come before the `call.state` naming their stream:
+    /// a call answered or placed here that has no stream yet takes the first nonzero one (PROTOCOL.md 8).
     func receiveAudio(_ plain: Data) {
-        guard plain.count > 3, let stream = relay?.stream, plain[plain.startIndex] == stream else { return }
         let b = plain.startIndex
+        guard plain.count > 3, let r = relay, plain[b] != 0 else { return }
+        if r.stream == nil, r.answered || r.outgoing {
+            relay?.stream = plain[b]
+            txSeq = 0
+            audio.newStream()
+            log.notice("stream \(Int(plain[b]), privacy: .public) taken from the first frame")
+        }
+        guard plain[b] == relay?.stream else { return }
         let seq = UInt16(plain[b + 1]) << 8 | UInt16(plain[b + 2])
         audio.receive(seq: seq, opus: Data(plain.dropFirst(3)))
     }
