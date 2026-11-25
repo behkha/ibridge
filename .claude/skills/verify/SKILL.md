@@ -16,7 +16,7 @@ A=~/Library/Android/sdk/platform-tools/adb
 cd tools/interop
 swiftc -O -o build/ios-side ../../ios/iBridge/Core/*.swift main.swift
 ../../android/gradlew -p . installDist -q
-./run.py          # 4 scenarios must print PASS; add -v for both sides' logs
+./run.py          # 5 scenarios must print PASS; add -v for both sides' logs
 ```
 Runs the app's real Kotlin `LinkEngine` (JVM, software key) against the real Swift `Handshake` over pipes at a 23-byte MTU.
 
@@ -46,6 +46,16 @@ $A shell dumpsys bluetooth_manager | grep -A1 mAdvertisingServiceUuids          
 - Wait for `← hello` in `$A logcat -s iBridge`; message types are logged as → / ←.
 - Logic checks (PROTOCOL §6 "While the link is down"): with the iPhone's Bluetooth off, Android logs `(not sent: no live link)` and the home card reads `Away since HH:mm. N text(s) will follow…`; on relink expect `← hello`, `→ status`, then the held `sms.read` / `sms.gone` / `contacts.changed`, then `page`s, then the iPhone's queued `← send` / `← read`. iPhone reads need `appops set app.ibridge.android WRITE_SMS allow` (user OK given for the Galaxy) to log `marked N of N texts read`. Google Messages deletes go to its bin first; `sms.gone` comes when the bin is emptied.
 - Who is scanning on the iPhone: `idevicesyslog | grep ScanParams` lists scan agents.
+
+## 2c. Calls with audio (phase 2)
+- Helper state: `$A logcat -s iBridge | grep -E "audio|adb:|helper|relay|call"`. Expect `audio: … → ready` and `call paths outside a call: {… "record":true,"track":true}`.
+- Restart test: `$A shell "pkill -f '^ibridge_call'"` (the process shows as `main`; `pkill -x` doesn't match it). Expect `audio: starting the helper (helper gone)` → `ready` within ~10 s, and `settings get global adb_wifi_enabled` back to `0`. Stale mDNS ports log `adb: port N refused` and are skipped.
+- Start the helper over USB instead: `$A shell am broadcast -a app.ibridge.HELPER_COMMAND -n app.ibridge.android/app.ibridge.service.HelperCommandReceiver` prints the command line (it carries the helper secret: don't paste it anywhere). Opus check: `-a app.ibridge.OPUS_CHECK`.
+- The helper grants iBridge `WRITE_SECURE_SETTINGS` itself (by design, so iBridge can switch Wireless debugging); test steps still never `pm grant` runtime permissions.
+- A real call: the user places it; check by ear (Galaxy earpiece near-silent, both sides hear). Android logs `← call.answer`, `relay <id>: sent ~50 received ~50` per second, `← call.hangup`; iPhone (`idevicesyslog -p iBridge`) logs `audio: in 50 out 50 depth 2-4 …`. After the call `$A shell dumpsys audio | grep -m3 -i "mode\|mic"` is back to normal.
+- Bench: hold the Settings phone card on the iPhone for 2 s (or launch with `-bench YES`); iPhone logs `bench A→I: 500/500 records in … ms`, Android logs the reverse.
+- Interop (§1) includes a bench scenario with AUDIO records both ways: 5 scenarios must PASS.
+- CI screenshots now also include `P2-calls` and `P2-keypad-text`. CI runs on any branch push, not only `main`.
 
 ## 3. iOS (no Xcode here)
 Push to `main` of the public repo behkha/ibridge; `.github/workflows/build.yml` builds the Simulator app with XcodeGen and runs `scripts/ios-screenshots.sh` (Main, A-Calls, A-Persian, Conversation(-fa), Keypad, Contacts, Settings(-fa), Pairing(-code) via `-demo`). Runner macos-26 (Xcode 26, system Liquid Glass bars); compiler errors print in the Build step.
