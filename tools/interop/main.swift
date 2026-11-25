@@ -54,6 +54,8 @@ func handle(_ events: [Handshake.Event]) {
                 send(try! h.seal(["t": "ping"])!)
             }
             if m["t"] as? String == "pong" { log("OK"); exit(0) }
+        case .audio(let plain):
+            log("got AUDIO \(plain.count) bytes")
         }
     }
 }

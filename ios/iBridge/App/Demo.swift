@@ -1,7 +1,8 @@
 import Foundation
 
 /// Launch arguments `-demo <scenario>` fill the store with the mockups' content, for CI screenshots.
-/// Scenarios: messages, calls-offline, conversation, keypad, contacts, settings, pairing, pairing-code.
+/// Scenarios: messages, calls, calls-offline, conversation, keypad, keypad-text, contacts, settings, pairing, pairing-code.
+/// Android relays calls in all of them (call key, blue call-back icons) except keypad-text and settings (the Settings row).
 /// No Bluetooth, no persistence.
 enum Demo {
     struct Scenario { var name: String; var tab: Int }
@@ -98,6 +99,8 @@ enum Demo {
 
         store.link = s.name.hasSuffix("offline") ? .outOfReach(since: today(14, 2)) : .linked
         if s.name == "conversation" { store.demoThread = "+989121110001" }
+        store.audioState = s.name == "settings" || s.name == "keypad-text" ? "setup" : "ready"
+        if s.name.hasPrefix("keypad") { store.demoNumber = "09121110001" }
         if s.name.hasPrefix("pairing") { store.peer = nil; store.link = .unpaired }
     }
 }

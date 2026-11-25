@@ -720,6 +720,66 @@
           }
         }
       }
+    },
+    "Call": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "تماس"
+          }
+        }
+      }
+    },
+    "Call back": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "تماس دوباره"
+          }
+        }
+      }
+    },
+    "Calls ring on the %@": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "تماس‌ها روی %@ زنگ می‌خورند"
+          }
+        }
+      }
+    },
+    "Set up there": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "آنجا راه‌اندازی کنید"
+          }
+        }
+      }
+    },
+    "Not running": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "فعال نیست"
+          }
+        }
+      }
+    },
+    "Not supported": {
+      "localizations": {
+        "fa": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "پشتیبانی نمی‌شود"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

@@ -49,6 +49,8 @@ final class Handshake {
         case paired(PairedPeer)
         case live
         case message([String: Any])
+        /// The plaintext of an `AUDIO` record: `stream(1) || seq(2) || opus` (PROTOCOL.md 8).
+        case audio(Data)
     }
 
     private enum Step {
@@ -116,6 +118,14 @@ final class Handshake {
     func seal(_ message: [String: Any]) throws -> Data? {
         guard case .live(var c) = step else { return nil }
         let out = try c.seal(try JSONSerialization.data(withJSONObject: message))
+        step = .live(c)
+        return out
+    }
+
+    /// Seals one `AUDIO` record; nil until the session has keys.
+    func sealAudio(_ plain: Data) throws -> Data? {
+        guard case .live(var c) = step else { return nil }
+        let out = try c.sealAudio(plain)
         step = .live(c)
         return out
     }
@@ -195,6 +205,11 @@ final class Handshake {
             confirmed = true
             guard let obj = try JSONSerialization.jsonObject(with: plain) as? [String: Any] else { return live }
             return live + [.message(obj)]
+
+        case (Proto.audio, .live(var c)):
+            let plain = try c.openAudio(p)
+            step = .live(c)
+            return [.audio(plain)]
 
         default:
             throw LinkError.badPacket("unexpected packet \(type)")

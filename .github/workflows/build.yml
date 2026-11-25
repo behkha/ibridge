@@ -30,6 +30,15 @@ jobs:
           test -f build/Build/Products/Debug-iphonesimulator/iBridge.app/iBridge
       - name: Screenshots
         run: scripts/ios-screenshots.sh build/Build/Products/Debug-iphonesimulator/iBridge.app screenshots
+      # Phase 2 (P2-Calls): Calls with blue call-back icons, and the keypad while calls aren't ready. Same simulator.
+      - name: Screenshots (calls)
+        run: |
+          for s in calls keypad-text; do
+            xcrun simctl terminate booted app.ibridge.ios 2>/dev/null || true
+            xcrun simctl launch booted app.ibridge.ios -demo "$s" -AppleLanguages "(en)" -AppleLocale en_US
+            sleep 6
+            xcrun simctl io booted screenshot "screenshots/P2-$s.png"
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: ios-screenshots

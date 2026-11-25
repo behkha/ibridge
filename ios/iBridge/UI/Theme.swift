@@ -21,6 +21,8 @@ enum Palette {
     static let tabOff = Color(hex: 0x7A8291)
     static let tabBg = Color(hex: 0xF9FAFB)
     static let disabled = Color(hex: 0xB4BAC4)
+    /// The call key, as in the Phone app (P2-Calls).
+    static let call = Color(hex: 0x34C759)
     static let numberTint = Color(hex: 0x8A93A3)
     static let camera = Color(hex: 0x1B2330)
     static let scanned = Color(hex: 0x3DDC97)
