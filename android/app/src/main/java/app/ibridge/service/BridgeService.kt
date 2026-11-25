@@ -85,9 +85,10 @@ class BridgeService : Service() {
         CallAudio.listener = relay
         CallAudio.kick("service start")
         // Debug builds only: `am broadcast -a app.ibridge.DEBUG_PAIR --es code 123456` stands in for the notification reply.
+        // Only a sender holding DUMP (the shell) reaches it.
         if (app.ibridge.BuildConfig.DEBUG) registerReceiver(object : BroadcastReceiver() {
             override fun onReceive(c: Context, i: Intent) { i.getStringExtra("code")?.let { CallAudio.pair(it) } }
-        }, IntentFilter("app.ibridge.DEBUG_PAIR"), RECEIVER_EXPORTED)
+        }, IntentFilter("app.ibridge.DEBUG_PAIR"), Manifest.permission.DUMP, null, RECEIVER_EXPORTED)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -314,9 +315,14 @@ class BridgeService : Service() {
         }
     }
 
+    /**
+     * `endCall` ends the foreground call when one is active, not the call ringing over it: with any other call on the
+     * Galaxy (a relayed one included) the decline is ignored and the waiting call keeps ringing.
+     */
     @SuppressLint("MissingPermission")
     private fun declineCall(callId: String) {
         if (!phone.has(Manifest.permission.ANSWER_PHONE_CALLS)) return
+        if (relay.active || relay.otherCall || inCallAudioMode()) { Log.i(TAG, "decline ignored: another call is active"); return }
         @Suppress("DEPRECATION")
         val ended = getSystemService(TelecomManager::class.java).endCall()
         if (ended) {
@@ -324,6 +330,12 @@ class BridgeService : Service() {
             if (ringing?.first == callId) { ringing = null; ringMsg = null } // the IDLE broadcast that follows is not a missed call
         }
     }
+
+    /** Telecom holds an in-call audio mode while a call is dialing, active or held (only ringtone mode while one just rings). */
+    private fun inCallAudioMode() = getSystemService(android.media.AudioManager::class.java).mode in setOf(
+        android.media.AudioManager.MODE_IN_CALL, android.media.AudioManager.MODE_IN_COMMUNICATION,
+        android.media.AudioManager.MODE_CALL_REDIRECT, android.media.AudioManager.MODE_COMMUNICATION_REDIRECT,
+    )
 
     // ---- live events ----
 

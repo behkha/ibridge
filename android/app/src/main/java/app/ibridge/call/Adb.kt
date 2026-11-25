@@ -58,12 +58,21 @@ class Adb(private val context: Context) {
         Settings.Secure.getInt(context.contentResolver, "rampart_main_switch_enabled").let { it == 1 }
     } catch (e: Exception) { null }
 
-    /** Turns Wireless debugging on or off. False when Android did not take it (Auto Blocker, no Wi-Fi, no permission). */
+    /** iBridge turned Wireless debugging on and has not seen it off since (kept across a process death mid-start). */
+    val wirelessOurs get() = prefs.getBoolean("wireless_ours", false)
+
+    /**
+     * Turns Wireless debugging on or off. False when Android did not take it (Auto Blocker, no Wi-Fi, no permission).
+     * Turning it on marks it as iBridge's before the switch; seeing it off clears the mark.
+     */
     fun setWireless(on: Boolean): Boolean {
-        if (!canSwitch) return wirelessOn == on
+        if (!canSwitch) return (wirelessOn == on).also { if (it && !on) prefs.edit().remove("wireless_ours").apply() }
+        if (on) prefs.edit().putBoolean("wireless_ours", true).commit()
         try { Settings.Global.putInt(context.contentResolver, "adb_wifi_enabled", if (on) 1 else 0) } catch (e: SecurityException) { return false }
-        repeat(15) { if (wirelessOn == on) return true; Thread.sleep(200) }
-        return wirelessOn == on
+        for (i in 0 until 15) { if (wirelessOn == on) break; Thread.sleep(200) }
+        val ok = wirelessOn == on
+        if (ok && !on) prefs.edit().remove("wireless_ours").apply()
+        return ok
     }
 
     // ---- pairing and running ----

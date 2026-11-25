@@ -168,7 +168,7 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 | `call.dial` | `req` (client id), `to`, `sim`? | `call.state` `dialing` with `req`, then audio; `call.end` `failed` with `req` if it could not be placed |
 | `call.hangup` | `call` | `call.end` `ended` |
 | `call.dtmf` | `call`, `digit` (`0-9 * #`) | — (A plays the tone into the call, 160 ms) |
-| `bench` | `n`, `size` | debug: A sends `n` `AUDIO` records of stream 0 with `size` payload bytes, as fast as flow control allows; I then sends `n` back and A answers `bench.done` |
+| `bench` | `n`, `size` | debug, refused while a call is relayed, `n` ≤ 2000, `size` ≤ 400: A sends `n` `AUDIO` records of stream 0 with `size` payload bytes, as fast as flow control allows; I then sends `n` back and A answers `bench.done` |
 | `ping` | — | `pong` |
 | `unpair` | — | A forgets `I_pub`, then disconnects. When the user unlinks while A is out of reach, I keeps `A_pub` only to send this at the next link (it keeps nothing A sends meanwhile) (even when the link looked live, since `send` only queues) and forgets it on `NOT_PAIRED` from that same phone or a new pairing |
 
@@ -185,8 +185,8 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 | `call` | `id`, `addr`, `name`?, `kind`: `in` \| `out` \| `missed` \| `rejected`, `ts`, `dur` (s), `sim` | each new call-log row |
 | `calls.gone` | `ids`: [call ids] | call-log rows deleted on A (by the user or Android's own trimming); I deletes them |
 | `call.ring` | `call` (event id), `addr`, `name`?, `sim`, `ts` | an incoming call starts ringing, and again after `hello` while it still rings |
-| `call.end` | `call`, `how`: `answered` \| `missed` \| `declined` \| `ended` \| `failed`, `req`? | that call stops ringing (`missed` also covers a call declined on A; the `call` row's `kind` tells them apart, and I alerts on `kind: missed`); `answered` means answered **on A**. For a relayed call (section 8): `ended` when it ends on either side, `failed` when a `call.dial` could not be placed or a `call.answer` could not be relayed |
-| `call.state` | `call`, `state`: `dialing` \| `alerting` \| `active` \| `held`, `dir`: `in` \| `out`, `addr`, `name`?, `sim`, `stream` (1–255), `req`? (echoes `call.dial`) | each state change of a relayed call (section 8), and again after `hello` while it lasts |
+| `call.end` | `call`, `how`: `answered` \| `missed` \| `declined` \| `ended` \| `failed`, `req`? | that call stops ringing (`missed` also covers a call declined on A; the `call` row's `kind` tells them apart, and I alerts on `kind: missed`); `answered` means answered **on A**. For a relayed call (section 8): `ended` when it ends on either side, `failed` when a `call.dial` could not be placed or a `call.answer` could not be relayed (A already has another call, or audio is not ready), and when the audio path fails mid-call |
+| `call.state` | `call`, `state`: `dialing` \| `alerting` \| `active`, `dir`: `in` \| `out`, `addr`, `name`?, `sim`, `stream` (1–255), `req`? (echoes `call.dial`) | each state change of a relayed call (section 8), and again after `hello` while it lasts |
 | `bench.done` | `n`, `ms` | debug: A received I's `n` bench records in `ms` |
 | `contacts.changed` | — | A's contacts changed (checked at most every 10 s); I re-syncs contacts from `null` |
 | `sent` | `req`, `ok`, `err`? | after a `send` finishes or fails |
@@ -230,7 +230,7 @@ A detects a code in each incoming text: the text matches `code|کد|رمز|pin|o
 
 ## 8. Calls with audio
 
-A call is **relayed** when the iPhone answers it (`call.answer`) or places it (`call.dial`). Its sound then flows both ways as `AUDIO` records while A keeps the Galaxy out of the call: its microphone muted, the audio mode `MODE_CALL_REDIRECT`, the voice-call volume at its minimum, all restored when the call ends. A call answered or placed on A itself stays on A and is not relayed.
+A call is **relayed** when the iPhone answers it (`call.answer`) or places it (`call.dial`). Its sound then flows both ways as `AUDIO` records while A keeps the Galaxy out of the call: its microphone muted, the audio mode `MODE_CALL_REDIRECT`, the voice-call volume at its minimum, all restored when the call ends. A call answered or placed on A itself stays on A and is not relayed. A relays one call at a time and only while it is the Galaxy's only call: if a second call becomes active or one is put on hold on A, the relay ends (`call.end ended`) and both calls stay on A. A `call.decline` never ends a different, active call.
 
 **Availability.** `status.audio` tells I whether relaying works now:
 | Value | Meaning | I does |

@@ -33,11 +33,13 @@ class CallReceiver : BroadcastReceiver() {
 /**
  * For whoever holds adb on this phone: `am broadcast -a app.ibridge.HELPER_COMMAND -n app.ibridge.android/app.ibridge.service.HelperCommandReceiver`
  * prints the shell command that starts the call helper (it carries the helper's secret), so the helper can be started
- * over USB too; `-a app.ibridge.OPUS_CHECK` runs one Opus round trip and prints what came out.
+ * over USB too; `-a app.ibridge.OPUS_CHECK` runs one Opus round trip and prints what came out. The helper itself sends
+ * `-a app.ibridge.HELPER_PROOF --es n <nonce>` to prove it runs as the shell (Wire).
  * Only a sender holding DUMP (the shell, the system) can reach this receiver.
  */
 class HelperCommandReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == app.ibridge.call.helper.Wire.PROOF_ACTION) { app.ibridge.call.CallAudio.proved(intent.getStringExtra("n")); return }
         if (intent.action == "app.ibridge.OPUS_CHECK") { resultData = app.ibridge.call.opusRoundTrip(); return }
         app.ibridge.call.CallAudio.init(context)
         resultData = app.ibridge.call.CallAudio.launchCommand()

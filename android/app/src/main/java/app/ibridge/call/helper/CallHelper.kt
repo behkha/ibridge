@@ -26,6 +26,7 @@ import java.lang.reflect.Method
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.ArrayDeque
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.PI
 import kotlin.math.sin
 import kotlin.system.exitProcess
@@ -39,6 +40,8 @@ import kotlin.system.exitProcess
  * and MODIFY_AUDIO_ROUTING. It serves 127.0.0.1:[Wire.PORT] to iBridge only (its uid, and proof of the secret), answers, places and ends calls, reports the
  * precise call state, and while relaying keeps the Galaxy out of the call (mic muted, MODE_CALL_REDIRECT, voice volume
  * at its minimum), restoring all three when the relay stops, iBridge's socket closes, the call ends or this process dies.
+ * It relays only the call iBridge answered or placed: `answer` and `dial` are refused while the Galaxy has another call,
+ * and the relay stops when a second call takes the Galaxy.
  * Proven in tools/call-audio-probe (docs/notes/call-audio-spike.md). Call audio is never written anywhere.
  */
 object CallHelper {
@@ -178,25 +181,58 @@ object CallHelper {
                 lastState = null // the next poll sends the state to the new client
             }
             "quit" -> { log("quit requested"); Relay.stop("quit"); exitProcess(0) }
-            "answer" -> if (invoke(telecom, "acceptRingingCall") == null) error("answer failed")
+            "prove" -> prove(c.optString("n"))
+            "answer" -> answer()
             "hangup" -> { val r = invoke(telecom, "endCall"); log("endCall: $r") }
             "silence" -> invoke(telecom, "silenceRinger")
             "dial" -> dial(c.optString("to"), c.optString("comp"), c.optString("id"))
-            "relay" -> if (c.optBoolean("on")) Relay.arm() else Relay.stop("asked")
+            "relay" -> if (!c.optBoolean("on")) Relay.stop("asked") // `answer` and `dial` arm it
             "dtmf" -> Relay.dtmf(c.optString("d").firstOrNull() ?: ' ')
-            "check" -> check()
+            "check" -> { lastState = null; check() } // iBridge accepted this connection: the next poll sends it the state
             else -> log("unknown command $name")
         }
     }
 
+    /**
+     * Sends iBridge's [nonce] back through a broadcast only a DUMP holder may send (Wire.PROOF_ACTION): iBridge takes
+     * this peer for its helper only once it arrives. Off the client thread: `am` takes a moment to start.
+     */
+    private fun prove(nonce: String) {
+        if (!Regex("[0-9a-f]{32}").matches(nonce)) { log("proof: bad nonce"); return }
+        Thread({
+            val t0 = SystemClock.elapsedRealtime()
+            try {
+                val p = ProcessBuilder("am", "broadcast", "-a", Wire.PROOF_ACTION, "-f", "0x10000000", // FLAG_RECEIVER_FOREGROUND
+                    "-n", "${Wire.PACKAGE}/${Wire.PROOF_RECEIVER}", "--es", "n", nonce).redirectErrorStream(true).start()
+                p.inputStream.bufferedReader().readText()
+                log("proof sent (exit ${p.waitFor()}, ${SystemClock.elapsedRealtime() - t0} ms)")
+            } catch (e: Exception) { log("proof: ${e.message}") }
+        }, "ibridge-proof").apply { isDaemon = true; start() }
+    }
+
+    /** Any call on the Galaxy besides one that only rings (PreciseCallState 1..6 in the foreground or background). */
+    private fun otherCall(st: Triple<Int, Int, Int>) = st.second in 1..6 || st.third in 1..6
+
+    /** Answers the ringing call for iBridge and arms the relay; refused while the Galaxy has another call (a waiting call included). */
+    private fun answer() {
+        val st = preciseState()
+        if (otherCall(st) || st.first == 6) { error("answer refused: another call (ring=${st.first} fg=${st.second} bg=${st.third})"); return }
+        if (invoke(telecom, "acceptRingingCall") == null) { error("answer failed"); return }
+        Relay.arm()
+    }
+
+    /** Places a call for iBridge and arms the relay; refused while the Galaxy has any call. */
     private fun dial(to: String, comp: String, id: String) {
         if (to.isBlank()) { error("dial: no number"); return }
+        val st = preciseState()
+        if (otherCall(st) || st.first in 1..6) { error("dial refused: another call (ring=${st.first} fg=${st.second} bg=${st.third})"); return }
         val extras = Bundle()
         ComponentName.unflattenFromString(comp)?.takeIf { id.isNotEmpty() }?.let {
             extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, PhoneAccountHandle(it, id))
         }
-        if (invoke(telecom, "placeCall", Uri.fromParts("tel", to, null), extras) == null) error("dial failed")
-        else log("placeCall sent")
+        if (invoke(telecom, "placeCall", Uri.fromParts("tel", to, null), extras) == null) { error("dial failed"); return }
+        log("placeCall sent")
+        Relay.arm()
     }
 
     /** Opens and closes both call-audio paths without a call (they open; the record reads silence). */
@@ -258,8 +294,11 @@ object CallHelper {
     private object Relay {
         @Volatile var armed = false
         @Volatile var running = false
+        /** Bumped by every start: loops of an earlier relay see it and quit, even after a quick stop and start. */
+        @Volatile private var gen = 0
         private var record: AudioRecord? = null
         private var track: AudioTrack? = null
+        private var loops: List<Thread> = emptyList()
         private var micWas: Boolean? = null
         private var modeTaken = false
         private var volWas = -1
@@ -268,8 +307,8 @@ object CallHelper {
         private var dtmfLow = 0.0
         private var dtmfHigh = 0.0
         private var dtmfPhase = 0L
-        // once-a-second stats
-        private var down = 0; private var up = 0; private var silent = 0; private var upDropped = 0
+        // once-a-second stats, counted on the audio threads
+        private val down = AtomicInteger(); private val up = AtomicInteger(); private val silent = AtomicInteger(); private val upDropped = AtomicInteger()
 
         /** Starts at once when a call is dialing, alerting, active or held; otherwise when one is. */
         @Synchronized fun arm() {
@@ -279,11 +318,16 @@ object CallHelper {
             lastState?.let { onState(it) }
         }
 
+        /**
+         * The relayed call is the one dialing, alerting or active in the foreground with nothing in the background. A held or
+         * background call (the user answered a waiting call on the Galaxy) ends the relay, and so does the relayed call
+         * ending, even with another call still ringing.
+         */
         @Synchronized fun onState(st: Triple<Int, Int, Int>) {
-            val (ring, fg, bg) = st
-            val call = fg in setOf(1, 3, 4) || bg == 2
-            if (armed && !running && call) start()
-            else if (running && !call && ring == 0 && fg != 2) stop("call ended")
+            val (_, fg, bg) = st
+            val ours = fg in setOf(1, 3, 4) && bg !in 1..6
+            if (armed && !running && ours) start()
+            else if (running && !ours) stop(if (bg in 1..6) "another call" else "call ended")
         }
 
         private fun start() {
@@ -301,23 +345,36 @@ object CallHelper {
             record = r; track = t
             synchronized(upQueue) { upQueue.clear() }
             running = true
-            Thread({ downLoop(r) }, "ibridge-down").start()
-            Thread({ upLoop(t) }, "ibridge-up").start()
-            Thread(::statsLoop, "ibridge-stats").apply { isDaemon = true; start() }
+            val g = ++gen
+            loops = listOf(Thread({ downLoop(r, g) }, "ibridge-down"), Thread({ upLoop(t, g) }, "ibridge-up"))
+            loops.forEach { it.start() }
+            Thread({ statsLoop(g) }, "ibridge-stats").apply { isDaemon = true; start() }
             log("relay on (opened in ${SystemClock.elapsedRealtime() - t0} ms; mic was muted=$micWas, voice volume was $volWas)")
-            event(JSONObject().put("e", "relay").put("on", true))
+            event(JSONObject().put("e", "relay").put("on", true).put("volWas", volWas))
         }
 
-        @Synchronized fun stop(why: String) {
+        /** [err] tells iBridge the audio path broke (it ends the call on the iPhone as failed). */
+        @Synchronized fun stop(why: String, err: String? = null) {
             armed = false
             if (!running) { restore(); return }
             running = false
-            record?.let { runCatching { it.stop() }; it.release() }
-            track?.let { runCatching { it.stop() }; it.release() }
+            // stop() unblocks a read or write in progress; the loops are let go (at most 500 ms each) before release.
+            record?.let { runCatching { it.stop() } }
+            track?.let { runCatching { it.stop() } }
+            loops.filter { it !== Thread.currentThread() }.forEach { it.join(500) }
+            loops = emptyList()
+            record?.release(); track?.release()
             record = null; track = null
             restore()
             log("relay off ($why)")
-            event(JSONObject().put("e", "relay").put("on", false))
+            event(JSONObject().put("e", "relay").put("on", false).putOpt("err", err))
+        }
+
+        /** A loop of relay [g] broke: the Galaxy gets its call back. Ignored once that relay is over. */
+        @Synchronized private fun fail(g: Int, what: String) {
+            if (g != gen || !running) return
+            log("error: $what")
+            stop(what, err = what)
         }
 
         /** Telecom may unmute or take the mode back when a call changes state; take them again (checked every second). */
@@ -342,7 +399,7 @@ object CallHelper {
             if (!running || pcm.size != Wire.FRAME_BYTES) return
             synchronized(upQueue) {
                 upQueue.addLast(pcm)
-                while (upQueue.size > UP_QUEUE) { upQueue.removeFirst(); upDropped++ }
+                while (upQueue.size > UP_QUEUE) { upQueue.removeFirst(); upDropped.incrementAndGet() }
             }
         }
 
@@ -360,39 +417,41 @@ object CallHelper {
             log("dtmf tone")
         }
 
-        private fun downLoop(r: AudioRecord) {
+        private fun live(g: Int) = running && gen == g
+
+        private fun downLoop(r: AudioRecord, g: Int) {
             val buf = ShortArray(Wire.FRAME)
             val bytes = ByteBuffer.allocate(Wire.FRAME_BYTES).order(ByteOrder.LITTLE_ENDIAN)
             try {
                 r.startRecording()
-                while (running) {
+                while (live(g)) {
                     var got = 0
-                    while (got < Wire.FRAME && running) {
+                    while (got < Wire.FRAME && live(g)) {
                         val n = r.read(buf, got, Wire.FRAME - got)
-                        if (n < 0) { error("downlink read $n"); return }
+                        if (n < 0) { if (live(g)) fail(g, "downlink read $n"); return }
                         got += n
                     }
                     bytes.clear(); bytes.asShortBuffer().put(buf)
                     client?.send(Wire.PCM, bytes.array().copyOf())
-                    down++
+                    down.incrementAndGet()
                 }
-            } catch (e: Throwable) { if (running) error("downlink: ${cause(e)}") }
+            } catch (e: Throwable) { if (live(g)) fail(g, "downlink: ${cause(e)}") }
         }
 
         /** Paced by the call's clock: each blocking write takes the next frame from iBridge, or silence. */
-        private fun upLoop(t: AudioTrack) {
+        private fun upLoop(t: AudioTrack, g: Int) {
             val pcm = ShortArray(Wire.FRAME)
             try {
                 t.play()
-                while (running) {
+                while (live(g)) {
                     val frame = synchronized(upQueue) { upQueue.pollFirst() }
-                    if (frame != null) { ByteBuffer.wrap(frame).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(pcm); up++ }
-                    else { pcm.fill(0); silent++ }
+                    if (frame != null) { ByteBuffer.wrap(frame).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer().get(pcm); up.incrementAndGet() }
+                    else { pcm.fill(0); silent.incrementAndGet() }
                     mixDtmf(pcm)
                     val w = t.write(pcm, 0, Wire.FRAME)
-                    if (w < 0) { error("uplink write $w"); return }
+                    if (w < 0) { if (live(g)) fail(g, "uplink write $w"); return }
                 }
-            } catch (e: Throwable) { if (running) error("uplink: ${cause(e)}") }
+            } catch (e: Throwable) { if (live(g)) fail(g, "uplink: ${cause(e)}") }
         }
 
         private fun mixDtmf(pcm: ShortArray) = synchronized(upQueue) {
@@ -406,16 +465,15 @@ object CallHelper {
             dtmfPhase += n; dtmfLeft -= n
         }
 
-        private fun statsLoop() {
-            while (running) {
+        private fun statsLoop(g: Int) {
+            while (live(g)) {
                 SystemClock.sleep(1000)
-                if (!running) return
+                if (!live(g)) return
                 enforce()
                 val q = synchronized(upQueue) { upQueue.size }
-                val line = "relay down=$down up=$up silent=$silent upDropped=$upDropped upQueue=$q underruns=${track?.underrunCount ?: -1}"
-                Log.i(TAG, "helper: $line")
-                event(JSONObject().put("e", "stats").put("down", down).put("up", up).put("silent", silent).put("upDropped", upDropped).put("upQueue", q))
-                down = 0; up = 0; silent = 0; upDropped = 0
+                val d = down.getAndSet(0); val u = up.getAndSet(0); val s = silent.getAndSet(0); val x = upDropped.getAndSet(0)
+                Log.i(TAG, "helper: relay down=$d up=$u silent=$s upDropped=$x upQueue=$q underruns=${track?.underrunCount ?: -1}")
+                event(JSONObject().put("e", "stats").put("down", d).put("up", u).put("silent", s).put("upDropped", x).put("upQueue", q))
             }
         }
     }

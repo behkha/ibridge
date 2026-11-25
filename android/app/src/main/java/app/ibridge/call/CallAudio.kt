@@ -51,6 +51,8 @@ object CallAudio {
         fun onAudioState(state: AudioState)
         fun onHelperEvent(e: JSONObject)
         fun onDownlink(pcm: ByteArray)
+        /** The helper's connection closed: a relay in progress has lost its sound. */
+        fun onHelperClosed()
     }
 
     private val _ui = MutableStateFlow(AudioUi())
@@ -89,18 +91,10 @@ object CallAudio {
     /** Service start, boot, or anything that may have let the helper start now. */
     fun kick(reason: String) = worker.execute { ensure(reason) }
 
-    fun command(c: JSONObject): Boolean {
-        val ok = helper?.takeIf { hello != null }?.command(c) == true
-        if (ok && c.optString("c") == "relay") relayVolume = if (c.optBoolean("on")) voiceVolume() else -1
-        return ok
-    }
+    fun command(c: JSONObject): Boolean = helper?.takeIf { hello != null }?.command(c) == true
 
-    /** The voice-call volume before the helper turned it down, while a relay runs; -1 otherwise. */
+    /** The voice-call volume before the helper turned it down (its `relay` event says), while a relay runs; -1 otherwise. */
     @Volatile private var relayVolume = -1
-
-    private fun voiceVolume(): Int = runCatching {
-        (ctx.getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager).getStreamVolume(android.media.AudioManager.STREAM_VOICE_CALL)
-    }.getOrDefault(-1)
 
     /**
      * The helper died mid-relay without its own restore (SIGKILL, crash): give the Galaxy its microphone and earpiece back,
@@ -166,6 +160,9 @@ object CallAudio {
     // ---- keeping the helper up ----
 
     private fun ensure(reason: String) {
+        // A start that never got to turn Wireless debugging back off (process killed, switch refused): off now. Starts run
+        // on this thread too, so none is in progress. Left alone when the user turned it on and iBridge never did.
+        if (adb.wirelessOurs) Log.i(TAG, "audio: Wireless debugging left on by iBridge; off: ${adb.setWireless(false)}")
         if (helper?.open == true && hello != null) {
             if (adb.paired && System.currentTimeMillis() - adb.lastUse > REFRESH_MS && wifi) refreshKey()
             publish(); return
@@ -188,20 +185,25 @@ object CallAudio {
         Log.i(TAG, "audio: next start attempt in $delay s")
     }
 
-    /** Connects to a running helper and checks its version. False when none runs (or it was outdated and quit). */
+    /**
+     * Connects to a running helper, checks its version and its proof of running as the shell. False when none runs, it
+     * was outdated and quit, or the peer could not prove it is the shell. Until then it is only a candidate: no command
+     * but `hello`, `quit` and `prove` goes to it, and nothing it sends reaches the relay.
+     */
     private fun connect(): Boolean {
         hello = null
-        val c = HelperClient(secret(), ::onEvent, { listener?.onDownlink(it) }, ::onHelperClosed)
+        lateinit var c: HelperClient
+        c = HelperClient(secret(), { onEvent(c, it) }, { if (helper === c) listener?.onDownlink(it) }, { onHelperClosed(c) })
         try { c.connect() } catch (e: Exception) {
             if (e is SecurityException) Log.w(TAG, "audio: ${e.message}")
             return false
         }
-        helper = c
         val got = java.util.concurrent.CountDownLatch(1)
         helloLatch = got
+        candidateHello = null
         c.command(JSONObject().put("c", "hello"))
         got.await(3, TimeUnit.SECONDS)
-        val h = hello
+        val h = candidateHello
         if (h == null) { Log.w(TAG, "audio: helper did not answer hello"); c.close(); return false }
         // Another build of the same helper protocol keeps working until iBridge can start the new one.
         val canRestart = adb.paired && wifi
@@ -210,27 +212,60 @@ object CallAudio {
             c.command(JSONObject().put("c", "quit"))
             c.close()
             Thread.sleep(500)
+            // Started again by the caller's ensure(), or here when the 30 s look found it.
+            retry?.cancel(false)
+            retry = worker.schedule({ ensure("helper outdated") }, 3, TimeUnit.SECONDS)
             return false
         }
+        if (!proven(c)) { Log.w(TAG, "audio: helper proof missing"); c.close(); return false }
+        helper = c
+        hello = h
         Log.i(TAG, "audio: helper connected, pid ${h.optInt("pid")}, interceptable=${h.optBoolean("interceptable")}")
         c.command(JSONObject().put("c", "check"))
         return true
     }
 
     @Volatile private var helloLatch: java.util.concurrent.CountDownLatch? = null
+    @Volatile private var candidateHello: JSONObject? = null
+    @Volatile private var proofNonce: String? = null
+    @Volatile private var proofLatch: java.util.concurrent.CountDownLatch? = null
 
-    private fun onEvent(e: JSONObject) {
-        if (e.optString("e") == "hello") { hello = e; helloLatch?.countDown(); return }
+    /**
+     * The peer sends a fresh nonce back by `am broadcast` to [app.ibridge.service.HelperCommandReceiver], which needs
+     * DUMP: only the shell or the system can, not an app that posed as adbd and read the launch command (Wire).
+     */
+    private fun proven(c: HelperClient): Boolean {
+        val n = Wire.nonce()
+        val got = java.util.concurrent.CountDownLatch(1)
+        proofLatch = got; proofNonce = n
+        val t0 = android.os.SystemClock.elapsedRealtime()
+        val ok = c.command(JSONObject().put("c", "prove").put("n", n)) && got.await(3, TimeUnit.SECONDS)
+        proofNonce = null; proofLatch = null
+        if (ok) Log.i(TAG, "audio: helper proof accepted in ${android.os.SystemClock.elapsedRealtime() - t0} ms")
+        return ok
+    }
+
+    /** From [app.ibridge.service.HelperCommandReceiver]: a `HELPER_PROOF` broadcast, which only a DUMP holder can send. */
+    fun proved(n: String?) {
+        val want = proofNonce ?: return
+        if (n != null && Wire.same(n, want)) proofLatch?.countDown()
+    }
+
+    private fun onEvent(from: HelperClient, e: JSONObject) {
+        if (e.optString("e") == "hello") { candidateHello = e; helloLatch?.countDown(); return }
+        if (from !== helper) return // not proven yet
         if (e.optString("e") == "check") { Log.i(TAG, "audio: call paths outside a call: $e"); return }
+        if (e.optString("e") == "relay") relayVolume = if (e.optBoolean("on")) e.optInt("volWas", -1) else -1
         listener?.onHelperEvent(e)
     }
 
-    private fun onHelperClosed() = worker.execute {
-        if (helper?.open == true) return@execute
+    private fun onHelperClosed(c: HelperClient) = worker.execute {
+        if (helper !== c) return@execute // a candidate that was turned away, or a connection already replaced
         helper = null
         hello = null
         Log.i(TAG, "audio: helper connection closed")
         restoreAfterHelperDeath()
+        listener?.onHelperClosed()
         publish()
         retry?.cancel(false)
         retry = worker.schedule({ ensure("helper gone") }, 3, TimeUnit.SECONDS)

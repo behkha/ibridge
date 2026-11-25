@@ -48,7 +48,7 @@ $A shell dumpsys bluetooth_manager | grep -A1 mAdvertisingServiceUuids          
 - Who is scanning on the iPhone: `idevicesyslog | grep ScanParams` lists scan agents.
 
 ## 2c. Calls with audio (phase 2)
-- Helper state: `$A logcat -s iBridge | grep -E "audio|adb:|helper|relay|call"`. Expect `audio: … → ready` and `call paths outside a call: {… "record":true,"track":true}`.
+- Helper state: `$A logcat -s iBridge | grep -E "audio|adb:|helper|relay|call"`. Expect `audio: helper proof accepted in N ms` (the helper proves it is the shell by a DUMP-only broadcast; without it iBridge refuses the peer), then `audio: … → ready` and `call paths outside a call: {… "record":true,"track":true}`.
 - Restart test: `$A shell "pkill -f '^ibridge_call'"` (the process shows as `main`; `pkill -x` doesn't match it). Expect `audio: starting the helper (helper gone)` → `ready` within ~10 s, and `settings get global adb_wifi_enabled` back to `0`. Stale mDNS ports log `adb: port N refused` and are skipped.
 - Start the helper over USB instead: `$A shell am broadcast -a app.ibridge.HELPER_COMMAND -n app.ibridge.android/app.ibridge.service.HelperCommandReceiver` prints the command line (it carries the helper secret: don't paste it anywhere). Opus check: `-a app.ibridge.OPUS_CHECK`.
 - The helper grants iBridge `WRITE_SECURE_SETTINGS` itself (by design, so iBridge can switch Wireless debugging); test steps still never `pm grant` runtime permissions.

@@ -15,6 +15,8 @@ import org.json.JSONObject
  * Calls relayed to the iPhone (PROTOCOL.md 8): `call.answer` / `call.dial` / `call.hangup` / `call.dtmf` from the
  * iPhone, `call.state` and `call.end` back, the sound as `AUDIO` records, and the debug `bench`.
  * Everything here runs on the GATT worker ([Gatt.post]); helper events are posted onto it.
+ * Only the call the iPhone took is relayed: answering or dialing while the Galaxy has another call fails, and a second
+ * call taking the Galaxy, or the sound path breaking, ends the relay with the Galaxy given its call back.
  */
 class CallRelay(
     private val context: Context,
@@ -28,17 +30,24 @@ class CallRelay(
         val id: String, val stream: Int, val dir: String, val addr: String, val name: String?, val sim: Int, val req: String?,
     ) {
         var state: String? = null
-        var relay: Relay? = null
+        /** Read on the helper's thread for each downlink frame. */
+        @Volatile var relay: Relay? = null
         val since = System.currentTimeMillis()
     }
 
-    private var call: Relayed? = null
+    /** Read on the helper's thread for each downlink frame. */
+    @Volatile private var call: Relayed? = null
+    /** The Galaxy's last precise call state from the helper (ring, foreground, background); idle without a helper. */
+    private var galaxy = IDLE
     private var nextStream = 1
     /** Bumped on every link drop and relink, so a 20 s hang-up timer knows whether it is stale. */
     private var linkEpoch = 0
 
     /** A call is relayed: pages stay small so audio is never stuck behind one. */
     val active get() = call != null
+
+    /** The Galaxy has a call besides one that only rings: dialing, active, held or waiting-over (PreciseCallState 1..6). */
+    val otherCall get() = galaxy.second in 1..6 || galaxy.third in 1..6
 
     // ---- from the iPhone ----
 
@@ -47,14 +56,17 @@ class CallRelay(
         val id = m.optString("call")
         when {
             ringing?.first != id || ring == null -> { push(end(id, "ended")); return false }
-            CallAudio.state != AudioState.READY || call != null -> { push(end(id, "failed")); return false }
+            CallAudio.state != AudioState.READY || call != null || otherCall -> {
+                if (otherCall || call != null) Log.i(TAG, "call $id: not answered for the iPhone: the Galaxy has another call")
+                push(end(id, "failed")); return false
+            }
         }
         val c = Relayed(id, stream(), "in", ringing!!.second, ring!!.optString("name").ifEmpty { null }, ring.optInt("sim", 1), null)
         call = c
-        CallAudio.command(JSONObject().put("c", "answer"))
-        CallAudio.command(JSONObject().put("c", "relay").put("on", true))
+        // The helper arms the relay once it answered (and refuses while the Galaxy has another call).
+        if (!CallAudio.command(JSONObject().put("c", "answer"))) { finish(c, "failed"); return false }
         Log.i(TAG, "call ${c.id}: answering for the iPhone (stream ${c.stream})")
-        gatt.post(delayMs = 10_000) { if (call === c && c.state == null) { Log.w(TAG, "call ${c.id}: not active 10 s after answer"); finish(c, "ended") } }
+        gatt.post(delayMs = 10_000) { if (call === c && c.state == null) { Log.w(TAG, "call ${c.id}: not active 10 s after answer"); finish(c, "failed") } }
         return true
     }
 
@@ -62,15 +74,17 @@ class CallRelay(
         val req = m.optString("req")
         val to = m.optString("to")
         val id = "c${System.currentTimeMillis()}"
-        if (to.isBlank() || CallAudio.state != AudioState.READY || call != null) { push(end(id, "failed", req)); return }
+        val busy = call != null || otherCall || galaxy.first in 1..6
+        if (busy) Log.i(TAG, "call.dial refused: the Galaxy has a call")
+        if (to.isBlank() || CallAudio.state != AudioState.READY || busy) { push(end(id, "failed", req)); return }
         val sim = m.optInt("sim", 0).takeIf { it > 0 }
         val handle = accountFor(sim)
         val slot = sim ?: phone.slotForSubscription(android.telephony.SubscriptionManager.getDefaultVoiceSubscriptionId())
         val c = Relayed(id, stream(), "out", to, phone.nameFor(to), slot, req)
         call = c
+        // The helper arms the relay once it placed the call (and refuses while the Galaxy has a call).
         val sent = CallAudio.command(JSONObject().put("c", "dial").put("to", to)
             .put("comp", handle?.componentName?.flattenToString() ?: "").put("id", handle?.id ?: ""))
-            && CallAudio.command(JSONObject().put("c", "relay").put("on", true))
         Log.i(TAG, "call ${c.id}: dialing for the iPhone (stream ${c.stream}, sim ${sim ?: "default"})")
         if (!sent) { finish(c, "failed"); return }
         gatt.post(delayMs = 15_000) { if (call === c && c.state == null) { Log.w(TAG, "call ${c.id}: never started"); CallAudio.command(JSONObject().put("c", "hangup")); finish(c, "failed") } }
@@ -128,17 +142,25 @@ class CallRelay(
 
     override fun onDownlink(pcm: ByteArray) { call?.relay?.onDownlink(pcm) }
 
+    /** The helper is gone: a relayed call has no sound any more. The Galaxy got its microphone and volume back (CallAudio). */
+    override fun onHelperClosed() = gatt.post {
+        galaxy = IDLE
+        call?.let { Log.w(TAG, "call ${it.id}: audio helper gone; relay over"); finish(it, "failed") }
+    }
+
     override fun onHelperEvent(e: JSONObject) = gatt.post {
         when (e.optString("e")) {
             "state" -> onState(e.optInt("ring"), e.optInt("fg"), e.optInt("bg"))
             "relay" -> {
                 val c = call
+                val err = e.optString("err")
                 if (e.optBoolean("on") && c != null && c.relay == null) {
                     c.relay = Relay(c.stream) { plain -> gatt.post { gatt.sendAudio(plain) } }.also { it.start() }
                     Log.i(TAG, "call ${c.id}: audio flowing")
                 } else if (!e.optBoolean("on")) {
-                    c?.relay?.stop(); c?.relay = null
-                    e.optString("err").takeIf { it.isNotEmpty() }?.let { Log.w(TAG, "call ${c?.id}: audio failed: $it") }
+                    if (err.isNotEmpty()) Log.w(TAG, "call ${c?.id}: audio failed: $err")
+                    // The helper stopped by itself and gave the Galaxy its call back: no silent call on the iPhone.
+                    if (c != null && (err.isNotEmpty() || c.relay != null)) finish(c, if (err.isNotEmpty()) "failed" else "ended")
                 }
             }
             "stats" -> call?.let { c ->
@@ -149,32 +171,31 @@ class CallRelay(
                 droppedBefore = gatt.audioDropped
             }
             "error" -> {
-                Log.w(TAG, "helper error: ${e.optString("what")}")
+                val what = e.optString("what")
+                Log.w(TAG, "helper error: $what")
+                // `answer failed`, `answer refused: …`, `dial failed`, `dial refused: …`: the relay never armed.
                 val c = call
-                if (c != null && c.state == null && e.optString("what").startsWith("dial")) finish(c, "failed")
+                if (c != null && c.relay == null && (what.startsWith("dial") || what.startsWith("answer"))) finish(c, "failed")
             }
         }
     }
 
     private var droppedBefore = 0L
 
-    /** Precise call states from the helper: 1 active, 2 holding, 3 dialing, 4 alerting, 5 incoming, 6 waiting. */
+    /**
+     * Precise call states from the helper: 1 active, 2 holding, 3 dialing, 4 alerting, 5 incoming, 6 waiting.
+     * The relayed call is the foreground one with nothing in the background (the helper relays on the same rule).
+     */
     private fun onState(ring: Int, fg: Int, bg: Int) {
+        galaxy = Triple(ring, fg, bg)
         val c = call ?: return
-        val state = when {
-            fg == 3 -> "dialing"
-            fg == 4 -> "alerting"
-            fg == 1 -> "active"
-            fg == 2 || bg == 2 -> "held"
-            else -> null
+        val state = when (fg) { 3 -> "dialing"; 4 -> "alerting"; 1 -> "active"; else -> null }
+        when {
+            c.state == null && (state == null || bg in 1..6) -> return // not started yet
+            bg in 1..6 -> { Log.i(TAG, "call ${c.id}: another call took the Galaxy; relay over"); finish(c, "ended") }
+            state == null -> finish(c, "ended") // the relayed call is gone, even with another one still ringing
+            state != c.state -> { c.state = state; push(stateMsg(c)) }
         }
-        if (state == null) {
-            if (c.state != null && ring !in 1..6) finish(c, "ended") // the call is gone
-            return
-        }
-        if (state == c.state) return
-        c.state = state
-        push(stateMsg(c))
     }
 
     private fun finish(c: Relayed, how: String) {
@@ -211,8 +232,9 @@ class CallRelay(
     private var benchFirstAt = 0L
 
     fun bench(m: JSONObject) {
-        val n = m.optInt("n").coerceIn(0, 10_000)
-        val size = m.optInt("size").coerceIn(1, 4_000)
+        if (call != null) { Log.w(TAG, "bench refused: a call is relayed"); return }
+        val n = m.optInt("n").coerceIn(0, 2_000)
+        val size = m.optInt("size").coerceIn(1, 400)
         benchExpect = n; benchGot = 0; benchFirstAt = 0
         var left = n
         var seq = 0
@@ -243,5 +265,8 @@ class CallRelay(
         benchExpect = 0
     }
 
-    companion object { const val TAG = "iBridge" }
+    companion object {
+        const val TAG = "iBridge"
+        val IDLE = Triple(0, 0, 0)
+    }
 }

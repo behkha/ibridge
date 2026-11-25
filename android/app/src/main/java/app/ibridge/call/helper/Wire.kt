@@ -12,14 +12,20 @@ import java.io.IOException
  * Why not a Unix socket: SELinux lets no app connect to a socket the shell serves ("Permission denied" on the Galaxy).
  * Loopback TCP is open to every app, so both ends first prove they hold one secret (iBridge makes the
  * secret, keeps it app-private and hands it to the helper on its command line, which other apps cannot read), and
- * the helper also checks in /proc/net/tcp that the connection belongs to iBridge's uid.
+ * the helper also checks in /proc/net/tcp that the connection belongs to iBridge's uid. The secret alone is not enough
+ * for iBridge: Wireless debugging is found by mDNS and Kadb does not authenticate adbd, so an app posing as adbd could
+ * read the launch command. iBridge then asks the peer to send a fresh nonce back by `am broadcast` to a receiver that
+ * needs DUMP, which only the shell and the system hold ([PROOF_ACTION]).
  */
 object Wire {
     const val PORT = 38_217
     /** Bump when the commands or events change: iBridge restarts a helper that answers another version. */
-    const val VERSION = 1
+    const val VERSION = 2
     const val PACKAGE = "app.ibridge.android"
     const val SHELL_UID = 2000
+    /** The helper's proof that it runs as the shell: this broadcast, carrying iBridge's nonce, reaches only a DUMP holder's sender. */
+    const val PROOF_ACTION = "app.ibridge.HELPER_PROOF"
+    const val PROOF_RECEIVER = "app.ibridge.service.HelperCommandReceiver"
 
     /** A JSON command (`c`) or event (`e`). */
     const val JSON: Int = 1
