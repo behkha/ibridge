@@ -38,6 +38,7 @@ header bits 0-5 SEQ  chunk counter mod 64, per direction, never reset during a c
 Rules:
 - The receiver appends payloads from FIRST to LAST. A SEQ gap, a FIRST in the middle of a packet, a non-FIRST chunk with no packet open, or a packet over 65 535 bytes drops the connection.
 - Flow control: A sends the next notification only after `onNotificationSent`. I uses Write Without Response and waits for `peripheralIsReady(toSendWriteWithoutResponse:)` when `canSendWriteWithoutResponse` is false.
+- Priority: a sender keeps `AUDIO` packets in their own queue and, at each packet boundary, sends a waiting `AUDIO` packet before the next queued packet of any other type. Chunks of different packets never interleave.
 - GATT delivers in order within one connection, so no acknowledgements or retransmits exist at this layer. Everything above it is idempotent or re-synced on reconnect (section 6).
 - A disconnect discards any half-built packet and the session keys.
 
@@ -55,6 +56,7 @@ Packet = `type(1) || body`.
 | `0x10` | `SESSION_HELLO` | I → A | `key_id(8) || Ei_pub(65)` |
 | `0x11` | `SESSION_ACCEPT` | A → I | `Ea_pub(65)` |
 | `0x20` | `DATA` | both | `counter(8) || ciphertext || tag(16)` |
+| `0x21` | `AUDIO` | both | `counter(8) || ciphertext || tag(16)`, section 8 |
 | `0x7F` | `ERROR` | both | `code(1) || reason(utf-8)` |
 
 Error codes: `1 NOT_PAIRED`, `2 PAIRING_CLOSED`, `3 BAD_PROOF`, `4 TOO_MANY_ATTEMPTS`, `5 BUSY` (reserved), `6 BAD_PACKET`, `7 VERSION`. The sender disconnects after an `ERROR`.
@@ -147,6 +149,8 @@ aad      = 0x20 || counter(8)
 - **Replay rejection**: the receiver accepts only `counter == expected` and then increments `expected`. A repeat, a gap or a failed tag ends the session and drops the connection. GATT is ordered, so an honest link never trips this.
 - **Limits**: after 2³² records in one direction the sender disconnects and a fresh handshake rekeys.
 
+- **`AUDIO` records** (section 8) use the same keys with their own counter per direction, starting at 0 for each session, and their own nonce: `dir = "I2A\0"` / `"A2I\0"`, `aad = 0x21 || counter(8)`. The receiver accepts any counter **greater** than the last `AUDIO` counter it accepted (a sender may drop frames before sealing them); anything else, or a failed tag, ends the session. `AUDIO` records are not counted against `DATA`'s counter, so a sender may put them ahead of queued `DATA`.
+
 ## 6. Messages
 
 The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`. Unknown types and unknown fields are ignored (forward compatibility). Times are Unix milliseconds. `sim` is the 1-based SIM slot.
@@ -160,6 +164,11 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 | `send` | `req` (client id), `to`, `body`, `sim`? | `sent` |
 | `read` | `ids`: [sms ids] | — (A marks them read where Android lets it, see "Read state") |
 | `call.decline` | `call` | `call.end` |
+| `call.answer` | `call` | `call.state` `active` and audio (section 8), or `call.end` if it no longer rings |
+| `call.dial` | `req` (client id), `to`, `sim`? | `call.state` `dialing` with `req`, then audio; `call.end` `failed` with `req` if it could not be placed |
+| `call.hangup` | `call` | `call.end` `ended` |
+| `call.dtmf` | `call`, `digit` (`0-9 * #`) | — (A plays the tone into the call, 160 ms) |
+| `bench` | `n`, `size` | debug: A sends `n` `AUDIO` records of stream 0 with `size` payload bytes, as fast as flow control allows; I then sends `n` back and A answers `bench.done` |
 | `ping` | — | `pong` |
 | `unpair` | — | A forgets `I_pub`, then disconnects. When the user unlinks while A is out of reach, I keeps `A_pub` only to send this at the next link (it keeps nothing A sends meanwhile) (even when the link looked live, since `send` only queues) and forgets it on `NOT_PAIRED` from that same phone or a new pairing |
 
@@ -167,7 +176,7 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 
 | `t` | Fields | When |
 |---|---|---|
-| `status` | `battery` 0–100, `charging`, `sims`: [{`sim`, `carrier`, `signal` 0–4}], `perms`: {`sms`, `calls`, `contacts`, `notifications`, `battery`}, `name` | after `hello`, then on any change, at most every 30 s |
+| `status` | `battery` 0–100, `charging`, `sims`: [{`sim`, `carrier`, `signal` 0–4}], `perms`: {`sms`, `calls`, `contacts`, `notifications`, `battery`}, `name`, `audio` (section 8) | after `hello`, then on any change, at most every 30 s |
 | `page` | `kind`, `items`, `cursor`, `more` | answer to `sync` |
 | `sms` | `id`, `thread`, `addr`, `name`?, `body`, `ts`, `dir`: `in` \| `out`, `read`, `sim`, `state`: `ok` \| `pending` \| `failed`, `code`? (one-time code found in an incoming text) | each text received or sent on A, and again when a stored text's `state` changes |
 | `sms.read` | `ids`: [sms ids] | texts that became read on A (by any app) |
@@ -176,7 +185,9 @@ The plaintext of a `DATA` record is one UTF-8 JSON object with a type field `t`.
 | `call` | `id`, `addr`, `name`?, `kind`: `in` \| `out` \| `missed` \| `rejected`, `ts`, `dur` (s), `sim` | each new call-log row |
 | `calls.gone` | `ids`: [call ids] | call-log rows deleted on A (by the user or Android's own trimming); I deletes them |
 | `call.ring` | `call` (event id), `addr`, `name`?, `sim`, `ts` | an incoming call starts ringing, and again after `hello` while it still rings |
-| `call.end` | `call`, `how`: `answered` \| `missed` \| `declined` \| `ended` | that call stops ringing (`missed` also covers a call declined on A; the `call` row's `kind` tells them apart, and I alerts on `kind: missed`) |
+| `call.end` | `call`, `how`: `answered` \| `missed` \| `declined` \| `ended` \| `failed`, `req`? | that call stops ringing (`missed` also covers a call declined on A; the `call` row's `kind` tells them apart, and I alerts on `kind: missed`); `answered` means answered **on A**. For a relayed call (section 8): `ended` when it ends on either side, `failed` when a `call.dial` could not be placed |
+| `call.state` | `call`, `state`: `dialing` \| `alerting` \| `active` \| `held`, `dir`: `in` \| `out`, `addr`, `name`?, `sim`, `stream` (1–255), `req`? (echoes `call.dial`) | each state change of a relayed call (section 8), and again after `hello` while it lasts |
+| `bench.done` | `n`, `ms` | debug: A received I's `n` bench records in `ms` |
 | `contacts.changed` | — | A's contacts changed (checked at most every 10 s); I re-syncs contacts from `null` |
 | `sent` | `req`, `ok`, `err`? | after a `send` finishes or fails |
 | `pong` | `ts` | answer to `ping` |
@@ -216,3 +227,29 @@ A detects a code in each incoming text: the text matches `code|کد|رمز|pin|o
 ## 7. Versioning
 
 `v=1` in the QR, the `"ibridge-…-v1"` labels and `hello.ver` carry the version. A side that cannot speak the peer's version sends `ERROR VERSION`.
+
+## 8. Calls with audio
+
+A call is **relayed** when the iPhone answers it (`call.answer`) or places it (`call.dial`). Its sound then flows both ways as `AUDIO` records while A keeps the Galaxy out of the call: its microphone muted, the audio mode `MODE_CALL_REDIRECT`, the voice-call volume at its minimum, all restored when the call ends. A call answered or placed on A itself stays on A and is not relayed.
+
+**Availability.** `status.audio` tells I whether relaying works now:
+| Value | Meaning | I does |
+|---|---|---|
+| `ready` | A's audio helper runs and the phone allows call-audio interception | rings with CallKit, offers dialing |
+| `setup` | Wireless debugging was never paired with iBridge | phase-1 notification only |
+| `off` | the helper is not running and A cannot start it now (no Wi-Fi, Wireless debugging refused, Auto Blocker) | phase-1 notification only |
+| `unsupported` | the phone refuses call-audio interception (`isPstnCallAudioInterceptable` false) | phase-1 notification only |
+
+A missing `audio` means `setup`. A sends a new `status` as soon as `audio` changes.
+
+**Flow.** Incoming: A sends `call.ring` as before; I with `audio: ready` reports it to CallKit; the user answers on the iPhone → `call.answer` → A answers, sends `call.state active`, and audio starts. Outgoing: `call.dial` → A places the call, sends `call.state dialing` (audio starts at once, so the iPhone hears the ringback), `alerting`, `active`. Either side ends it: `call.hangup` from I, or `call.end ended` from A when the far side or A's user hangs up. If the link drops during a relayed call, A keeps the call going for 20 s waiting for I to relink; after that it ends the call (a call nobody can hear is worse than a dropped one).
+
+**`AUDIO` plaintext.**
+```
+stream(1) || seq(2) || opus(1 .. 400)
+```
+- `stream`: the relayed call, from `call.state` (A picks 1–255, a new one per call). `0` is the debug `bench` stream. A receiver drops frames of any other stream.
+- `seq`: per stream and direction, +1 per 20 ms frame, wraps at 65 536. A gap means the sender dropped frames; the receiver conceals them.
+- `opus`: one Opus packet, 16 kHz mono, 20 ms, VBR ~24 kbit/s, no FEC (GATT is lossless), no DTX.
+
+**Timing.** Each side sends one frame per 20 ms. A sender that falls behind keeps at most 3 frames queued and drops the oldest. I's jitter buffer targets 60 ms and conceals a missing frame; when the clocks drift it drops or adds one frame of silence at a quiet moment. While audio flows A caps a `page` at 4 KB of JSON, so one `DATA` packet holds the link for at most a few connection events.

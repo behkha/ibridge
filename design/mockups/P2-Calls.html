@@ -1,0 +1,410 @@
+<title>iBridge Call Screens</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Layout: one column of decisions; each decision is a row of phone frames with notes outside the frames. */
+:root{
+  --bg:#F4F5F8; --fg:#0E1A2B; --muted:#4A5566; --line:#DADEE5; --card:#FFFFFF; --accent:#1D5BD8; --pick:#137A4B; --pickBg:#E6F4EC;
+  --doc:"Inter",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#10151D;--fg:#E8ECF2;--muted:#A3ADBC;--line:#2A3340;--card:#171E28;--accent:#7FA6F5;--pick:#5FCB95;--pickBg:#173326;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#10151D;--fg:#E8ECF2;--muted:#A3ADBC;--line:#2A3340;--card:#171E28;--accent:#7FA6F5;--pick:#5FCB95;--pickBg:#173326;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--doc);font-size:15px;line-height:1.5}
+.wrap{max-width:1180px;margin:0 auto;padding-block:32px 64px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:48px}
+h1{font-size:30px;line-height:1.2;margin:0;text-wrap:balance}
+h2{font-size:21px;margin:0;text-wrap:balance}
+h3{font-size:16px;margin:0}
+p{margin:0;max-width:68ch}
+.lead{display:flex;flex-direction:column;gap:10px}
+.lead p{color:var(--muted)}
+section{display:flex;flex-direction:column;gap:18px}
+.q{color:var(--muted);font-size:14px;letter-spacing:.04em;text-transform:uppercase;font-weight:600}
+.opts{display:flex;flex-wrap:wrap;gap:28px;align-items:flex-start}
+.opt{display:flex;flex-direction:column;gap:12px;min-width:0;flex:1 1 300px;max-width:560px}
+.opt.rec .tag{background:var(--pickBg);color:var(--pick)}
+.tag{align-self:flex-start;font-size:12px;font-weight:600;padding:3px 10px;border-radius:99px;background:var(--line);color:var(--muted)}
+.frames{display:flex;gap:14px;flex-wrap:wrap}
+.notes{font-size:14px;color:var(--muted);display:flex;flex-direction:column;gap:6px;max-width:560px}
+.notes b{color:var(--fg);font-weight:600}
+.refs{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.ref{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;font-size:14px;min-width:0}
+.ref a{color:var(--accent);word-break:break-all}
+.flow{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;font-size:14px;display:flex;flex-direction:column;gap:8px}
+.flow ol{margin:0;padding-left:20px;display:flex;flex-direction:column;gap:4px}
+
+/* phone frame: screens are drawn at 390x844 and scaled */
+.frame{width:250px;height:541px;border-radius:34px;overflow:hidden;box-shadow:0 0 0 7px #121821,0 10px 30px rgba(10,20,40,.18);flex:none;position:relative}
+.frame.small{height:330px}
+.screen{width:390px;height:844px;transform:scale(.641);transform-origin:top left;box-sizing:border-box;position:absolute;inset:0 auto auto 0}
+.cap{font-size:12px;color:var(--muted);text-align:center;margin-top:12px;width:250px}
+
+/* Android screen tokens (fixed: product mockups are light) */
+.and{background:#FBFBFD;color:#0E1A2B;font-family:"Roboto",system-ui,sans-serif;padding:48px 16px 24px;display:flex;flex-direction:column;gap:14px}
+.and h4{margin:0;padding:0 8px;font-size:28px;line-height:36px;font-weight:500}
+.and .sub{padding:0 8px;font-size:15px;line-height:22px;color:#3F4A5A}
+.row{padding:14px 16px;border-radius:18px;background:#fff;border:1px solid #E3E6EB;display:flex;align-items:center;gap:14px}
+.row .b{width:40px;height:40px;flex:none;border-radius:20px;display:flex;align-items:center;justify-content:center}
+.row .t{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.row .t div:first-child{font-size:16px;font-weight:500}
+.row .t div+div{font-size:14px;line-height:19px;color:#5B6472}
+.row .btn{height:40px;padding:0 16px;border-radius:20px;display:flex;align-items:center;font-size:14px;font-weight:500;flex:none}
+.done .b{background:#E6F4EC}.todo .b{background:#EAF0FC}.warn{border-color:#F2C9A0}.warn .b{background:#FFF1E0}.warn .t div+div{color:#7A3E00}.warn .btn{background:#FFF1E0;color:#7A3E00}
+.todo{border-color:#BFD0F4}.todo .btn{background:#1D5BD8;color:#fff}
+.grey .b{background:#EEF0F3}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:28px 28px 0 0;padding:14px 20px 34px;display:flex;flex-direction:column;gap:14px;box-shadow:0 -8px 30px rgba(0,0,0,.12)}
+.scrim{position:absolute;inset:0;background:rgba(14,26,43,.38)}
+.grab{width:36px;height:4px;border-radius:2px;background:#C9CED6;align-self:center}
+.step{display:flex;gap:14px;align-items:flex-start}
+.step .n{width:30px;height:30px;border-radius:15px;flex:none;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500}
+.step .n.ok{background:#137A4B;color:#fff}.step .n.now{background:#1D5BD8;color:#fff}.step .n.next{background:#EEF0F3;color:#5B6472}
+.step .x{display:flex;flex-direction:column;gap:2px;flex:1}
+.step .x div:first-child{font-size:16px;font-weight:500}
+.step .x div+div{font-size:14px;color:#5B6472;line-height:19px}
+.pill{height:48px;border-radius:24px;background:#1D5BD8;color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:500}
+.pill.ghost{background:#EAF0FC;color:#1D5BD8}
+/* notification shade */
+.shade{background:#1B2028;color:#E9EDF3;font-family:"Roboto",system-ui,sans-serif;padding:52px 12px 20px;display:flex;flex-direction:column;gap:10px}
+.clock{font-size:44px;font-weight:400;padding:0 12px 10px}
+.ntf{background:#2A313C;border-radius:26px;padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+.ntf .h{display:flex;align-items:center;gap:8px;font-size:13px;color:#AAB3C0}
+.ntf .ic{width:22px;height:22px;border-radius:11px;background:#1D5BD8;display:flex;align-items:center;justify-content:center}
+.ntf .ti{font-size:16px;font-weight:500}
+.ntf .tx{font-size:14px;color:#C4CBD6;line-height:19px}
+.reply{margin-top:4px;height:48px;border-radius:24px;background:#3A4350;display:flex;align-items:center;padding:0 8px 0 18px;gap:8px;font-size:17px;letter-spacing:6px}
+.reply .send{margin-left:auto;width:36px;height:36px;border-radius:18px;background:#8FB0F5;display:flex;align-items:center;justify-content:center}
+.seg{display:flex;gap:4px}.seg i{flex:1;height:4px;border-radius:2px;background:#4A5361}.seg i.on{background:#8FB0F5}
+/* iPhone screen tokens */
+.ios{background:#fff;color:#0E1A2B;font-family:-apple-system,"SF Pro Text","Inter",system-ui,sans-serif;display:flex;flex-direction:column;position:relative}
+.ios .top{padding:60px 20px 8px;display:flex;align-items:center;justify-content:space-between}
+.ios .top b{font-size:34px;font-weight:700}
+.lp{height:30px;padding:0 12px;border-radius:15px;background:#E6F4EC;color:#0F5E3A;font-size:14px;font-weight:600;display:flex;align-items:center;gap:6px}
+.lp i{width:8px;height:8px;border-radius:4px;background:#137A4B}
+.num{text-align:center;font-size:36px;font-weight:500;letter-spacing:1px;margin-top:26px}
+.who{text-align:center;color:#1D5BD8;font-size:17px;font-weight:600;height:24px}
+.pad{display:grid;grid-template-columns:repeat(3,78px);gap:14px 26px;justify-content:center;margin-top:18px}
+.k{width:78px;height:78px;border-radius:39px;background:#EEF0F3;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.k b{font-size:34px;font-weight:400;line-height:38px}.k s{text-decoration:none;font-size:10px;font-weight:600;letter-spacing:2px;height:12px}
+.acts{display:flex;justify-content:center;align-items:center;gap:22px;margin-top:22px}
+.green{width:78px;height:78px;border-radius:39px;background:#34C759;display:flex;align-items:center;justify-content:center}
+.textb{height:56px;padding:0 30px;border-radius:28px;background:#1D5BD8;color:#fff;font-size:17px;font-weight:600;display:flex;align-items:center;gap:8px}
+.textb.sm{height:44px;padding:0 18px;background:#EAF0FC;color:#1D5BD8;font-size:15px}
+.tabs{position:absolute;left:16px;right:16px;bottom:24px;height:62px;border-radius:31px;background:rgba(249,250,251,.92);box-shadow:0 2px 14px rgba(0,0,0,.1);display:flex;justify-content:space-around;align-items:center;font-size:11px;color:#7A8291}
+.tabs span{display:flex;flex-direction:column;align-items:center;gap:3px}.tabs .on{color:#1D5BD8}
+.tabs svg{width:22px;height:22px}
+.callrow{display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid #E3E6EB;min-height:60px;box-sizing:border-box}
+.callrow .t{flex:1}.callrow .t div:first-child{font-size:17px;font-weight:600}.callrow .t div+div{font-size:14px;color:#6B7380}
+.callrow .w{font-size:15px;color:#6B7380}
+/* CallKit system screens */
+.ck{background:linear-gradient(180deg,#5B6B7E,#2E3742);color:#fff;font-family:-apple-system,"SF Pro Text","Inter",system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;padding-top:120px;gap:6px}
+.ck .nm{font-size:34px;font-weight:500}.ck .via{font-size:17px;opacity:.75}
+.ck .btns{position:absolute;bottom:110px;left:0;right:0;display:flex;justify-content:space-around}
+.ck .rb{width:78px;height:78px;border-radius:39px;display:flex;align-items:center;justify-content:center}
+.ck .grid{display:grid;grid-template-columns:repeat(3,78px);gap:26px 34px;margin-top:150px}
+.ck .g{width:78px;height:78px;border-radius:39px;background:rgba(255,255,255,.18);display:flex;align-items:center;justify-content:center}
+.ck .gl{font-size:12px;text-align:center;margin-top:6px;opacity:.85}
+.strip{margin:6px 16px 0;height:44px;border-radius:22px;background:#34C759;color:#fff;display:flex;align-items:center;padding:0 16px;gap:10px;font-size:15px;font-weight:600}
+.strip span{margin-left:auto;font-variant-numeric:tabular-nums}
+.grp{margin:20px 16px 0;background:#fff;border-radius:14px}
+.grp .r{display:flex;align-items:center;justify-content:space-between;padding:0 16px;min-height:48px;font-size:17px;border-bottom:1px solid #E3E6EB}
+.grp .r:last-child{border-bottom:0}
+.dot{display:inline-flex;align-items:center;gap:6px;color:#6B7380;font-size:15px}.dot i{width:8px;height:8px;border-radius:4px;background:#137A4B}
+.card{margin:4px 16px 0;padding:18px;border-radius:22px;background:#E6F4EC;color:#0F4D31;display:flex;flex-direction:column;gap:10px}
+.stats{display:flex;gap:8px}.stats div{flex:1;background:rgba(255,255,255,.7);border-radius:14px;padding:10px 12px;font-size:13px}.stats b{display:block;font-size:17px}
+@media (prefers-reduced-motion: no-preference){.ref,.opt{transition:transform .15s}}
+</style>
+
+<div class="wrap">
+  <div class="lead">
+    <h1>Calls on the iPhone</h1>
+    <p>Phase 2 lets a call ring, be answered and be spoken entirely on the iPhone while the Galaxy stays in a pocket. Four screens change. Each decision below has its options side by side with the same data; the recommended option is marked.</p>
+  </div>
+
+  <section>
+    <div class="q">How it works</div>
+    <div class="flow">
+      <ol>
+        <li>Once, on the Galaxy: iBridge pairs with the phone's own <b>Wireless debugging</b> (you type a 6-digit code). That lets iBridge start a small helper with the phone's debugging rights, which can hear and speak into a call.</li>
+        <li>iBridge then keeps Wireless debugging off. After a restart it switches it on for a few seconds over Wi-Fi to start the helper again. A running helper does not need Wi-Fi.</li>
+        <li>A call rings on the iPhone with the normal iPhone call screen. Answer there: the Galaxy mutes its microphone, turns its earpiece down to the minimum, and the call's sound travels encrypted over Bluetooth.</li>
+        <li>The keypad and call history can place calls through the Galaxy the same way.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <div class="q">Decision 1 · Android: setting up calls</div>
+    <h2>How the Galaxy walks you through Wireless debugging</h2>
+    <div class="opts">
+      <div class="opt rec">
+        <span class="tag">Recommended</span>
+        <h3>Checklist step</h3>
+        <div class="frames">
+          <div>
+            <div class="frame"><div class="screen and">
+              <h4>iBridge</h4>
+              <div class="row done"><div class="b"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#137A4B" stroke-width="2.4"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div><div class="t"><div>Texts and contacts</div></div></div>
+              <div class="row done"><div class="b"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#137A4B" stroke-width="2.4"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div><div class="t"><div>Calls and call history</div></div></div>
+              <div class="row todo"><div class="b"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1D5BD8" stroke-width="2"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg></div><div class="t"><div>Talk on your iPhone</div><div>Answer and place calls there</div></div><div class="btn">Set up</div></div>
+            </div></div>
+            <div class="cap">Home: one new row while calls aren't set up</div>
+          </div>
+          <div>
+            <div class="frame"><div class="screen and" style="padding:0">
+              <div style="padding:48px 16px 0;display:flex;flex-direction:column;gap:14px;opacity:.5"><h4>iBridge</h4></div>
+              <div class="scrim"></div>
+              <div class="sheet">
+                <div class="grab"></div>
+                <div style="font-size:22px;font-weight:500">Talk on your iPhone</div>
+                <div class="step"><div class="n ok">✓</div><div class="x"><div>Developer options are on</div></div></div>
+                <div class="step"><div class="n now">2</div><div class="x"><div>Turn on Wireless debugging</div><div>Settings › Developer options › Wireless debugging. Wi-Fi must be on.</div></div></div>
+                <div class="step"><div class="n next">3</div><div class="x"><div>Tap “Pair device with pairing code”</div></div></div>
+                <div class="step"><div class="n next">4</div><div class="x"><div>Type the code into iBridge's notification</div><div>Pull down the notifications without leaving Settings.</div></div></div>
+                <div class="pill">Open Wireless debugging</div>
+              </div>
+            </div></div>
+            <div class="cap">Sheet: live steps, one button</div>
+          </div>
+          <div>
+            <div class="frame"><div class="screen shade">
+              <div class="clock">14:21</div>
+              <div class="ntf">
+                <div class="h"><div class="ic"><svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><circle cx="6" cy="12" r="4"/><circle cx="18" cy="12" r="4"/><rect x="6" y="10.5" width="12" height="3"/></svg></div>iBridge · now</div>
+                <div class="ti">Pairing code</div>
+                <div class="tx">Type the 6 digits shown under “Pair with device”.</div>
+                <div class="reply">482 913<div class="send"><svg width="18" height="18" viewBox="0 0 24 24" fill="#1B2028"><path d="M3 20l18-8L3 4v6l12 2-12 2z"/></svg></div></div>
+              </div>
+            </div></div>
+            <div class="cap">Notification: code typed over Settings</div>
+          </div>
+        </div>
+        <div class="notes">
+          <p><b>Why:</b> it is the existing Checklist pattern: one row, one sheet, the same green ticks. Steps tick themselves as iBridge sees Wireless debugging turn on and the pairing finish, so the sheet is right when you come back.</p>
+          <p><b>Trade-off:</b> four steps are visible at once. Step 1 only appears when Developer options are off (seven taps on Build number).</p>
+        </div>
+      </div>
+
+      <div class="opt">
+        <span class="tag">Option B</span>
+        <h3>One step per card</h3>
+        <div class="frames">
+          <div>
+            <div class="frame"><div class="screen and">
+              <div style="height:4px;border-radius:2px;background:#E3E6EB;margin:8px 8px 0"><div style="width:50%;height:4px;border-radius:2px;background:#1D5BD8"></div></div>
+              <div style="padding:56px 8px 0;display:flex;flex-direction:column;gap:12px;flex:1">
+                <div style="font-size:15px;color:#5B6472">Step 2 of 4</div>
+                <div style="font-size:28px;line-height:36px;font-weight:500">Turn on Wireless debugging</div>
+                <div style="font-size:16px;line-height:24px;color:#3F4A5A">In Developer options, switch on Wireless debugging. Wi-Fi must be on. iBridge moves on by itself when it sees it.</div>
+              </div>
+              <div class="pill">Open Wireless debugging</div>
+            </div></div>
+            <div class="cap">Full screen per step, auto-advances</div>
+          </div>
+        </div>
+        <div class="notes">
+          <p><b>Good:</b> one thing to read at a time.</p>
+          <p><b>Trade-off:</b> a new full-screen pattern the app doesn't use anywhere else, and you can't see how far the end is beyond the bar. Same notification as the recommended option.</p>
+        </div>
+      </div>
+
+      <div class="opt">
+        <span class="tag">Option C</span>
+        <h3>Notification-led</h3>
+        <div class="frames">
+          <div>
+            <div class="frame"><div class="screen shade">
+              <div class="clock">14:21</div>
+              <div class="ntf">
+                <div class="h"><div class="ic"><svg width="12" height="12" viewBox="0 0 24 24" fill="#fff"><circle cx="6" cy="12" r="4"/><circle cx="18" cy="12" r="4"/><rect x="6" y="10.5" width="12" height="3"/></svg></div>iBridge · setting up calls</div>
+                <div class="seg"><i class="on"></i><i class="on"></i><i class="on"></i><i></i></div>
+                <div class="ti">That code didn't work</div>
+                <div class="tx">Tap “Pair device with pairing code” again and type the new code.</div>
+                <div class="reply" style="letter-spacing:normal;color:#AAB3C0;font-size:15px">Pairing code<div class="send" style="background:#4A5361"><svg width="18" height="18" viewBox="0 0 24 24" fill="#1B2028"><path d="M3 20l18-8L3 4v6l12 2-12 2z"/></svg></div></div>
+              </div>
+            </div></div>
+            <div class="cap">The notification carries steps and errors</div>
+          </div>
+        </div>
+        <div class="notes">
+          <p><b>Good:</b> you never leave Settings; the notification shows progress and errors in place.</p>
+          <p><b>Trade-off:</b> instructions in a notification are cramped and easy to swipe away; the app itself would only show a waiting state.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="q">Decision 1, continued · Android home when calls can't reach the iPhone</div>
+    <div class="opts">
+      <div class="opt rec" style="max-width:none">
+        <div class="frames">
+          <div>
+            <div class="frame"><div class="screen and">
+              <h4>iBridge</h4>
+              <div class="row warn"><div class="b"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A65300" stroke-width="2.2" stroke-linecap="round"><path d="M12 7v6M12 16.5h.01"/></svg></div><div class="t"><div>Calls stay on this phone</div><div>Turn on Wi-Fi once so iBridge can start after the restart.</div></div><div class="btn">Wi-Fi</div></div>
+              <div class="row warn"><div class="b"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#A65300" stroke-width="2.2" stroke-linecap="round"><path d="M12 7v6M12 16.5h.01"/></svg></div><div class="t"><div>Auto Blocker is on</div><div>It turns off Wireless debugging, so calls stay on this phone.</div></div><div class="btn">Settings</div></div>
+              <div class="row grey"><div class="b"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#5B6472" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></div><div class="t"><div>Calls can't move to the iPhone</div><div>This phone's software doesn't allow it. Alerts still arrive.</div></div></div>
+            </div></div>
+            <div class="cap">Three states, shown one at a time in the existing warning list</div>
+          </div>
+        </div>
+        <div class="notes"><p>When calls work, nothing is added to the home screen. A warning appears only while the iPhone would fall back to the call alert of phase 1.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="q">Decision 2 · iPhone: placing a call</div>
+    <h2>Keypad and call history</h2>
+    <div class="opts">
+      <div class="opt rec">
+        <span class="tag">Recommended</span>
+        <h3>Call first</h3>
+        <div class="frames">
+          <div>
+            <div class="frame"><div class="screen ios">
+              <div class="top"><b>Keypad</b><div class="lp"><i></i>Galaxy</div></div>
+              <div class="num">0912 345 6789</div><div class="who">Sara Ahmadi</div>
+              <div class="pad">
+                <div class="k"><b>1</b><s> </s></div><div class="k"><b>2</b><s>ABC</s></div><div class="k"><b>3</b><s>DEF</s></div>
+                <div class="k"><b>4</b><s>GHI</s></div><div class="k"><b>5</b><s>JKL</s></div><div class="k"><b>6</b><s>MNO</s></div>
+                <div class="k"><b>7</b><s>PQRS</s></div><div class="k"><b>8</b><s>TUV</s></div><div class="k"><b>9</b><s>WXYZ</s></div>
+                <div class="k"><b>+</b><s> </s></div><div class="k"><b>0</b><s>+</s></div><div class="k" style="background:none"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#0E1A2B" stroke-width="1.8"><path d="M9 5h11v14H9l-6-7z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/></svg></div>
+              </div>
+              <div class="acts"><div style="width:78px;display:flex;justify-content:center"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#1D5BD8" stroke-width="2"><path d="M4 5h16v11H8l-4 4z"/></svg></div><div class="green"><svg width="34" height="34" viewBox="0 0 24 24" fill="#fff"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg></div><div style="width:78px"></div></div>
+              <div class="tabs"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 5h16v11H8l-4 4z"/></svg>Messages</span><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg>Calls</span><span class="on"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="6" cy="6" r="2"/><circle cx="12" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/><circle cx="12" cy="18" r="2"/></svg>Keypad</span><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="9" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/></svg>Contacts</span><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg>Settings</span></div>
+            </div></div>
+            <div class="cap">Green call key like the Phone app; Text moves to its left</div>
+          </div>
+          <div>
+            <div class="frame small"><div class="screen ios">
+              <div class="top"><b>Calls</b><div class="lp"><i></i>Galaxy</div></div>
+              <div class="callrow"><div class="t"><div>Sara Ahmadi</div><div>Incoming, SIM 1</div></div><div class="w">14:02</div><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1D5BD8" stroke-width="2" style="margin:0 11px"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg></div>
+              <div class="callrow"><div class="t"><div style="color:#C4001A">Reza Karimi</div><div>Missed, SIM 1</div></div><div class="w">Yesterday</div><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1D5BD8" stroke-width="2" style="margin:0 11px"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg></div>
+              <div class="callrow"><div class="t"><div>Neda Jafari</div><div>Outgoing, SIM 2</div></div><div class="w">Mon</div><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#1D5BD8" stroke-width="2" style="margin:0 11px"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg></div>
+            </div></div>
+            <div class="cap">Calls: the grey phone icon turns blue</div>
+          </div>
+        </div>
+        <div class="notes">
+          <p><b>Why:</b> it reads like the iPhone's own Phone app, so placing a call needs no learning. Text stays one tap away. While calls aren't ready, the keypad is exactly today's Text pad.</p>
+        </div>
+      </div>
+      <div class="opt">
+        <span class="tag">Option B</span>
+        <h3>Call and Text side by side</h3>
+        <div class="frames">
+          <div>
+            <div class="frame small"><div class="screen ios">
+              <div class="top"><b>Keypad</b><div class="lp"><i></i>Galaxy</div></div>
+              <div class="num">0912 345 6789</div><div class="who">Sara Ahmadi</div>
+              <div class="acts" style="margin-top:40px"><div class="textb" style="background:#34C759"><svg width="20" height="20" viewBox="0 0 24 24" fill="#fff"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg>Call</div><div class="textb"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M4 5h16v11H8l-4 4z"/></svg>Text</div></div>
+            </div></div>
+            <div class="cap">Two equal capsules under the pad (pad not drawn)</div>
+          </div>
+        </div>
+        <div class="notes"><p><b>Good:</b> both actions equally visible. <b>Trade-off:</b> two big buttons compete, and calling looks unlike the Phone app.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="q">Decision 3 · iPhone: during a call</div>
+    <h2>What you see while talking</h2>
+    <div class="opts">
+      <div class="opt rec">
+        <span class="tag">Recommended</span>
+        <h3>System call screen only</h3>
+        <div class="frames">
+          <div>
+            <div class="frame"><div class="screen ck">
+              <div class="nm">Sara Ahmadi</div><div class="via">iBridge Audio</div>
+              <div class="btns"><div style="text-align:center"><div class="rb" style="background:#FF3B30"><svg width="34" height="34" viewBox="0 0 24 24" fill="#fff" style="transform:rotate(135deg)"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg></div><div class="gl">Decline</div></div><div style="text-align:center"><div class="rb" style="background:#34C759"><svg width="34" height="34" viewBox="0 0 24 24" fill="#fff"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg></div><div class="gl">Accept</div></div></div>
+            </div></div>
+            <div class="cap">Ringing: the iPhone's own screen</div>
+          </div>
+          <div>
+            <div class="frame"><div class="screen ck" style="padding-top:110px">
+              <div class="nm">Sara Ahmadi</div><div class="via" style="font-variant-numeric:tabular-nums">00:42</div>
+              <div class="grid">
+                <div><div class="g"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 010 6"/></svg></div><div class="gl">speaker</div></div>
+                <div><div class="g" style="opacity:.4"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="7" width="12" height="10" rx="2"/><path d="M15 11l6-3v8l-6-3"/></svg></div><div class="gl">FaceTime</div></div>
+                <div><div class="g"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3M4 4l16 16"/></svg></div><div class="gl">mute</div></div>
+                <div><div class="g"><svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div><div class="gl">add call</div></div>
+                <div><div class="g" style="background:#FF3B30"><svg width="30" height="30" viewBox="0 0 24 24" fill="#fff" style="transform:rotate(135deg)"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg></div><div class="gl">end</div></div>
+                <div><div class="g"><svg width="28" height="28" viewBox="0 0 24 24" fill="#fff"><circle cx="6" cy="6" r="2"/><circle cx="12" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="18" cy="12" r="2"/><circle cx="12" cy="18" r="2"/></svg></div><div class="gl">keypad</div></div>
+              </div>
+            </div></div>
+            <div class="cap">In call: mute, speaker, keypad tones all work</div>
+          </div>
+        </div>
+        <div class="notes">
+          <p><b>Why:</b> CallKit gives the lock-screen ring, Dynamic Island, the green status pill, AirPods and CarPlay for free, and it looks exactly like a normal call. iBridge adds nothing in-app. “add call” stays disabled: one call at a time.</p>
+          <p>Calls placed or answered here don't go into the iPhone's own Recents; they are in iBridge's Calls tab already.</p>
+        </div>
+      </div>
+      <div class="opt">
+        <span class="tag">Option B</span>
+        <h3>System screen plus an in-app strip</h3>
+        <div class="frames">
+          <div>
+            <div class="frame small"><div class="screen ios">
+              <div class="top"><b>Messages</b><div class="lp"><i></i>Galaxy</div></div>
+              <div class="strip"><svg width="18" height="18" viewBox="0 0 24 24" fill="#fff"><path d="M6.6 10.8a15.1 15.1 0 006.6 6.6l2.2-2.2a1 1 0 011-.25 11.4 11.4 0 003.6.57 1 1 0 011 1V20a1 1 0 01-1 1A17 17 0 013 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.25.2 2.45.57 3.57a1 1 0 01-.25 1z"/></svg>Sara Ahmadi<span>00:42</span></div>
+            </div></div>
+            <div class="cap">A green strip on every tab while a call lasts</div>
+          </div>
+        </div>
+        <div class="notes"><p><b>Good:</b> obvious way back to the call from inside iBridge. <b>Trade-off:</b> iOS already shows the green pill in the status bar for the same thing; the strip duplicates it.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="q">Decision 4 · iPhone Settings: are calls ready?</div>
+    <div class="opts">
+      <div class="opt rec">
+        <span class="tag">Recommended</span>
+        <h3>A row only when calls aren't ready</h3>
+        <div class="frames">
+          <div>
+            <div class="frame small"><div class="screen ios" style="background:#F2F2F7">
+              <div class="top"><b>Settings</b><div class="lp"><i></i>Galaxy</div></div>
+              <div class="card"><div style="font-size:22px;font-weight:600">Linked to Galaxy S21 Ultra</div><div style="font-size:15px">Encrypted. Last text just now.</div><div class="stats"><div><b>82%</b>battery</div><div><b>Irancell</b>SIM 1</div></div></div>
+              <div class="grp"><div class="r"><span>Calls ring on the Galaxy</span><span class="dot" style="color:#A65300"><i style="background:#A65300"></i>Set up there</span></div></div>
+            </div></div>
+            <div class="cap">Shown only while calls fall back to alerts</div>
+          </div>
+        </div>
+        <div class="notes"><p><b>Why:</b> when calls work there is nothing to say; when they don't, the row names where to fix it (the reason mirrors the Galaxy's warning: set up, Wi-Fi, Auto Blocker, not supported).</p></div>
+      </div>
+      <div class="opt">
+        <span class="tag">Option B</span>
+        <h3>A permanent Calls row</h3>
+        <div class="frames">
+          <div>
+            <div class="frame small"><div class="screen ios" style="background:#F2F2F7">
+              <div class="top"><b>Settings</b><div class="lp"><i></i>Galaxy</div></div>
+              <div class="card"><div style="font-size:22px;font-weight:600">Linked to Galaxy S21 Ultra</div><div style="font-size:15px">Encrypted. Last text just now.</div><div class="stats"><div><b>82%</b>battery</div><div><b>Irancell</b>SIM 1</div></div></div>
+              <div class="grp"><div class="r"><span>Calls</span><span class="dot"><i></i>On this iPhone</span></div></div>
+            </div></div>
+            <div class="cap">Always present, green or orange</div>
+          </div>
+        </div>
+        <div class="notes"><p><b>Good:</b> reassurance that calls will ring here. <b>Trade-off:</b> a permanent label that says “all fine” most of the time.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="q">References that shaped these</div>
+    <div class="refs">
+      <div class="ref"><b>Paired, live checklist</b> (Mobbin, via Pinterest). Ticks fill in as each step finishes; the next step is highlighted. <a href="https://www.pinterest.com/pin/499899627415735366/">pinterest.com/pin/499899627415735366</a></div>
+      <div class="ref"><b>Android 16 Live Updates</b>. A notification with a segmented progress bar and actions, the base for option C. <a href="https://www.pinterest.com/pin/4611193536004909888/">pinterest.com/pin/4611193536004909888</a></div>
+      <div class="ref"><b>Card wizard onboarding</b> (Memberstack). One step per card with a thin bar, the base for option B. <a href="https://www.pinterest.com/pin/1107252258453200475/">pinterest.com/pin/1107252258453200475</a></div>
+      <div class="ref"><b>Call Dynamic Island</b>. The whole call state in one pill, which iOS already provides through CallKit. <a href="https://www.pinterest.com/pin/743938432243718439/">pinterest.com/pin/743938432243718439</a></div>
+      <div class="ref"><b>Settings with a trailing status word</b>. One row, a coloured dot and a short word, used in decision 4. <a href="https://www.pinterest.com/pin/1101059809022781214/">pinterest.com/pin/1101059809022781214</a></div>
+      <div class="ref"><b>Shizuku</b> (open source). Pairs with Wireless debugging by typing the code into a notification reply, the only way that keeps the Settings dialog open. <a href="https://github.com/RikkaApps/Shizuku">github.com/RikkaApps/Shizuku</a></div>
+    </div>
+  </section>
+</div>

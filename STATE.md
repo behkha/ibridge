@@ -32,6 +32,9 @@ Goal: our own iTell. Android holds the SIM; texts, contacts, calls and call aler
 1. Phase 1 finished 2026-11-24 (MMS and a long real-world run skipped by the user). Verified on both phones: read both ways, send while away, catch-up + away card, deletes (`sms.gone`, `calls.gone`), contacts changes, ring re-sent on relink, missed-call alert, unlink while away delivered later.
    - Galaxy runs the release-signed APK (key ~/.ibridge, backup ~/Documents/iBridge-signing-backup: move it off this Mac). WRITE_SMS app-op allowed there (user OK).
    - Left: MMS/group texts; long real-world run; WRITE_SMS needs adb (phase 2's wireless-debugging route could grant it); one `BAD_PACKET bad tag` seen once mid-unlink (recovered by itself).
-2. Next: phase 2 (call audio, research/FINDINGS.md); the Galaxy is Exynos, so only the shell-privileged route applies.
+2. Phase 2 (calls with audio) started 2026-11-25. Spike: docs/notes/call-audio-spike.md. Earpiece quiet only with mic mute + REDIRECT + voice volume min; outgoing calls behave like incoming.
+   - Approved design (P2-Calls, https://claude.ai/artifact/BoADihwAZHdtpm9yRWbEx7, file design/mockups/P2-Calls.html): Android checklist row "Talk on your iPhone" + live-steps sheet + code typed in a notification reply; home warnings (Wi-Fi / Auto Blocker / unsupported); iPhone green call key (Text to its left), blue call-back icons, CallKit system screen only, Settings row only when calls aren't ready. Galaxy silent while the iPhone rings. Wi-Fi is available for helper starts.
+   - Protocol drafted: PROTOCOL §2 priority, §5.1 AUDIO (0x21, own counters), §6 call.answer/dial/hangup/dtmf, call.state, bench, §8.
+   - In progress: Android helper + ADB client (Kadb) + relay (worker); iPhone CallKit + audio (worker). Then: interop AUDIO scenario, bench on the real link, Android setup UI, real call on both phones, latency both ways, fresh-eyes review.
 ## Open questions
 - Paid Apple account would allow TestFlight (7-day free signing is fine for now).
