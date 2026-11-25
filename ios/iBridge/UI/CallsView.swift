@@ -43,6 +43,7 @@ struct CallsView: View {
 
 private struct CallCell: View {
     @Environment(Store.self) private var store
+    @Environment(\.central) private var central
     var call: Call
     var count: Int
 
@@ -69,16 +70,26 @@ private struct CallCell: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             Text(Fmt.when(call.ts)).font(.app(15)).foregroundStyle(Palette.secondary)
-            // Phase 1 has no call audio: calling back is not possible yet, from anywhere.
-            Image(systemName: "phone")
-                .font(.system(size: 19)).foregroundStyle(Palette.disabled)
-                .frame(width: 44, height: 44)
-                .accessibilityLabel("Call back, not available yet")
+            // Blue while Android relays calls and is in reach (P2-Calls); grey otherwise, as in phase 1.
+            Button(action: callBack) {
+                Image(systemName: "phone")
+                    .font(.system(size: 19)).foregroundStyle(store.canCall ? Palette.accent : Palette.disabled)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!store.canCall)
         }
         .padding(.vertical, 9)
         .overlay(alignment: .bottom) { Rectangle().fill(Palette.separator).frame(height: 1) }
         .padding(.horizontal, 16)
         .frame(minHeight: 60)
         .accessibilityElement(children: .combine)
+        .accessibilityAction(named: store.canCall ? Text("Call back") : Text("Call back, not available yet"), callBack)
+    }
+
+    private func callBack() {
+        guard store.canCall, !call.addr.isEmpty else { return }
+        central?.calls.dial(call.addr, sim: call.sim > 0 ? call.sim : nil)
     }
 }

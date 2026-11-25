@@ -16,7 +16,17 @@ final class Central: NSObject {
     private var handshake: Handshake?
     private var framer = Framer()
     private var deframer = Deframer()
-    private var outbox: [Data] = []
+    /// Packets waiting to go, oldest first: handshake messages and sealed `DATA`.
+    private var packets: [Data] = []
+    /// `AUDIO` plaintexts, sealed when they go out; they pass `packets` at a packet boundary (PROTOCOL.md 2, "Priority").
+    private var audio: [Data] = []
+    /// Chunks of the packet on the air. Packets are split only when they start, so chunk SEQs stay in send order.
+    private var chunks: [Data] = []
+    /// Relayed calls: CallKit, the call messages and the call's sound.
+    let calls: CallManager
+    /// The `bench` run in progress, if any.
+    private var bench: Bench?
+    private var benchOnLive = UserDefaults.standard.bool(forKey: "bench")
 
     /// Set while the user is pairing; cleared on success or failure.
     private var pairing: PairingStart?
@@ -46,7 +56,10 @@ final class Central: NSObject {
 
     init(store: Store) {
         self.store = store
+        calls = CallManager(store: store)
         super.init()
+        calls.send = { [weak self] m in self?.send(m) ?? false }
+        calls.sendAudio = { [weak self] plain in self?.sendAudio(plain) }
         retired = Keychain.read("ibridge-retired").flatMap { try? JSONDecoder().decode(PairedPeer.self, from: $0) }
         manager = CBCentralManager(delegate: self, queue: .main, options: [CBCentralManagerOptionRestoreIdentifierKey: "app.ibridge.central"])
         // Never sit idle while not linked, and never trust a "linked" state Android no longer shares.
@@ -132,6 +145,35 @@ final class Central: NSObject {
         return true
     }
 
+    /// Queues one `AUDIO` plaintext. A sender that falls behind keeps the newest 3 and drops the oldest (PROTOCOL.md 8).
+    func sendAudio(_ plain: Data) {
+        guard handshake?.isLive == true, rx != nil else { return }
+        audio.append(plain)
+        if audio.count > 3 {
+            audio.removeFirst()
+            audioDropped += 1
+            if audioDropped % 50 == 1 { log.notice("audio: link behind, \(self.audioDropped, privacy: .public) frames dropped so far") }
+        }
+        pump()
+    }
+
+    private var audioDropped = 0
+
+    /// Debug: `bench` (PROTOCOL.md 6). Android sends 500 stream-0 records, this iPhone counts them and sends 500 back.
+    func startBench(n: Int = 500, size: Int = 60) {
+        guard bench == nil, calls.isIdle else { log.notice("bench: busy"); return }
+        let b = Bench(n: n, size: size)
+        b.onFinish = { [weak self] report in
+            guard let self else { return }
+            bench = nil
+            if let report { store.alert = report }
+        }
+        b.onSendReady = { [weak self] in self?.pump() }
+        guard send(["t": "bench", "n": n, "size": size]) else { log.notice("bench: link not live"); return }
+        bench = b
+        b.started()
+    }
+
     // MARK: connection
 
     /// Drops the connection and connects again; the pause lets iOS finish the cancel before the new connect,
@@ -208,7 +250,12 @@ final class Central: NSObject {
         handshake = nil
         framer = Framer()
         deframer = Deframer()
-        outbox = []
+        packets = []
+        audio = []
+        chunks = []
+        bench?.cancel()
+        bench = nil
+        calls.linkLost()
     }
 
     private func lost() {
@@ -223,16 +270,30 @@ final class Central: NSObject {
     // MARK: packets
 
     private func queue(_ packet: Data) {
-        guard let p = peripheral else { return }
-        framer.split(packet, chunkSize: p.maximumWriteValueLength(for: .withoutResponse)).forEach { outbox.append($0) }
+        guard peripheral != nil else { return }
+        packets.append(packet)
         pump()
     }
 
     private func pump() {
         guard let p = peripheral, let rx else { return }
-        while !outbox.isEmpty && p.canSendWriteWithoutResponse {
-            p.writeValue(outbox.removeFirst(), for: rx, type: .withoutResponse)
+        while p.canSendWriteWithoutResponse {
+            if chunks.isEmpty {
+                guard let next = nextPacket() else { return }
+                chunks = framer.split(next, chunkSize: p.maximumWriteValueLength(for: .withoutResponse))
+            }
+            p.writeValue(chunks.removeFirst(), for: rx, type: .withoutResponse)
         }
+    }
+
+    /// At a packet boundary a waiting `AUDIO` record goes first, then the oldest other packet.
+    private func nextPacket() -> Data? {
+        if audio.isEmpty, let frame = bench?.nextFrame() { audio.append(frame) }
+        while !audio.isEmpty {
+            let plain = audio.removeFirst()
+            if let h = handshake, let packet = (try? h.sealAudio(plain)) ?? nil { return packet }
+        }
+        return packets.isEmpty ? nil : packets.removeFirst()
     }
 
     private func ready() {
@@ -280,10 +341,18 @@ final class Central: NSObject {
                 }
                 if store.contacts.isEmpty { refreshContacts() }
                 flush()
+                calls.linkLive()
+                if benchOnLive { benchOnLive = false; startBench() } // launch argument `-bench YES`
             case .message where store.peer == nil && pairing == nil:
                 break // the unlinked phone's catch-up while `unpair` is on its way: none of it is kept
             case .message(let m) where m.str("t") == "pong":
                 pingSentAt = nil
+            case .message(let m) where m.str("t") == "bench.done":
+                bench?.androidDone(m)
+            case .message(let m) where calls.handle(m):
+                break // a call CallKit shows: no phase-1 alert
+            case .audio(let plain):
+                if plain.first == 0, let bench { bench.received(plain) } else { calls.receiveAudio(plain) }
             case .message(let m):
                 let contactsNowAllowed = m.str("t") == "status"
                     && (m["perms"] as? [String: Any])?["contacts"] as? Bool == true

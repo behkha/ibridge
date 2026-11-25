@@ -1,10 +1,12 @@
 import SwiftUI
 
 // Approved round-2 boards (canvas page "Screens round 2"): K1 Text pad, N2 Quick text, S1 Phone card.
+// Phase 2 (design/mockups/P2-Calls.html): the call key, and the Settings row while calls aren't ready.
 
-/// Text pad: round keys, the call button becomes Text (phase 1 has no call audio).
+/// Round keys. When Android relays calls: a green call key with Text to its left; otherwise the Text pad of phase 1.
 struct KeypadView: View {
     @Environment(Store.self) private var store
+    @Environment(\.central) private var central
     var onPill: () -> Void
     @State private var number = ""
     @State private var path: [Chat] = []
@@ -34,22 +36,51 @@ struct KeypadView: View {
                     ForEach(keys, id: \.self) { k in key(k) }
                 }
                 .environment(\.layoutDirection, .leftToRight)
-                Button { open() } label: {
-                    Label("Text", systemImage: "message")
-                        .font(.app(17, .semibold)).foregroundStyle(.white)
-                        .padding(.horizontal, 30).frame(height: 56)
-                        .background(Palette.accent, in: Capsule())
-                }
-                .buttonStyle(FilledButtonStyle())
-                .disabled(number.count < 3)
-                .padding(.top, 22)
+                if store.callsReady { callKeys } else { textKey }
                 Spacer(minLength: 8)
             }
             .background(Color.white)
             .navigationTitle("Keypad")
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Chat.self) { ConversationView(chat: $0) }
+            .onAppear { if let n = store.demoNumber, number.isEmpty { number = n } }
         }
+    }
+
+    private var textKey: some View {
+        Button { open() } label: {
+            Label("Text", systemImage: "message")
+                .font(.app(17, .semibold)).foregroundStyle(.white)
+                .padding(.horizontal, 30).frame(height: 56)
+                .background(Palette.accent, in: Capsule())
+        }
+        .buttonStyle(FilledButtonStyle())
+        .disabled(number.count < 3)
+        .padding(.top, 22)
+    }
+
+    /// Under the pad's middle column, like the Phone app; Text sits under the left column.
+    private var callKeys: some View {
+        HStack(spacing: 26) {
+            Button { open() } label: {
+                Image(systemName: "message").font(.system(size: 26)).foregroundStyle(Palette.accent)
+                    .frame(width: 78, height: 78)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(FilledButtonStyle())
+            .disabled(number.count < 3)
+            .accessibilityLabel("Text")
+            Button { central?.calls.dial(number) } label: {
+                Image(systemName: "phone.fill").font(.system(size: 32)).foregroundStyle(.white)
+                    .frame(width: 78, height: 78)
+                    .background(Palette.call, in: Circle())
+            }
+            .buttonStyle(FilledButtonStyle())
+            .disabled(number.count < 3 || !store.canCall)
+            .accessibilityLabel("Call")
+            Color.clear.frame(width: 78, height: 78)
+        }
+        .padding(.top, 22)
     }
 
     private func open() { if number.count >= 3 { path = [Chat(thread: nil, addr: number)] } }
@@ -194,6 +225,9 @@ struct SettingsView: View {
                 TabHeader(title: "Settings", onPill: onPill) { EmptyView() }
                 if store.peer != nil {
                     PhoneCard().padding(.horizontal, 16).padding(.top, 4)
+                        // Debug: hold the card to measure the link (`bench`, PROTOCOL.md 6); the result shows in an alert.
+                        .onLongPressGesture(minimumDuration: 2) { central?.startBench() }
+                    if !store.callsReady { group { callsRow } }
                     group {
                         row("Pair again", color: Palette.ink, chevron: true, action: onPair)
                         Rectangle().fill(Palette.separator).frame(height: 1)
@@ -210,6 +244,26 @@ struct SettingsView: View {
         } message: {
             Text("This iPhone stops getting texts and calls until you pair again.")
         }
+    }
+
+    /// Shown only while calls fall back to the phase-1 alert; the word says what to fix on Android.
+    private var callsRow: some View {
+        let reason: LocalizedStringKey = switch store.audioState {
+        case "off": "Not running"
+        case "unsupported": "Not supported"
+        default: "Set up there"
+        }
+        return HStack(spacing: 12) {
+            Text("Calls ring on the \(Fmt.isolate(store.peerName))").font(.app(17)).foregroundStyle(Palette.ink)
+            Spacer(minLength: 0)
+            HStack(spacing: 6) {
+                Circle().fill(Palette.away).frame(width: 8, height: 8)
+                Text(reason).font(.app(15)).foregroundStyle(Palette.away)
+            }
+            .fixedSize()
+        }
+        .padding(.horizontal, 16).padding(.vertical, 12).frame(minHeight: 48)
+        .accessibilityElement(children: .combine)
     }
 
     private func group<C: View>(@ViewBuilder _ content: () -> C) -> some View {

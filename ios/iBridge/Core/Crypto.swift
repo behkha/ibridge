@@ -113,12 +113,16 @@ enum Keychain {
     static func delete(_ account: String) { SecItemDelete(query(account) as CFDictionary) }
 }
 
-/// AES-256-GCM records with strict per-direction counters (PROTOCOL.md 5.1).
+/// AES-256-GCM records (PROTOCOL.md 5.1): `DATA` with strict per-direction counters, and `AUDIO` with counters
+/// of its own that may skip ahead (a sender drops frames before sealing them), so audio can pass queued `DATA`.
 struct RecordCipher {
     let sendKey: SymmetricKey
     let recvKey: SymmetricKey
     private var sendCounter: UInt64 = 0
     private var recvCounter: UInt64 = 0
+    private var audioSendCounter: UInt64 = 0
+    /// The lowest `AUDIO` counter still accepted: one past the last one accepted.
+    private var audioRecvNext: UInt64 = 0
 
     init(sendKey: Data, recvKey: Data) {
         self.sendKey = SymmetricKey(data: sendKey)
@@ -129,24 +133,49 @@ struct RecordCipher {
         try! AES.GCM.Nonce(data: (Data(ascii: dir) + Data([0])).bigEndian(counter))
     }
 
+    private static func seal(_ plain: Data, type: UInt8, counter: UInt64, key: SymmetricKey, dir: String) throws -> Data {
+        guard counter < (1 << 32) else { throw LinkError.badPacket("rekey needed") }
+        let header = Data([type]).bigEndian(counter)
+        let box = try AES.GCM.seal(plain, using: key, nonce: nonce(dir, counter), authenticating: header)
+        return header + box.ciphertext + box.tag
+    }
+
+    /// The record's counter and plaintext. A counter `accept` refuses, or a bad tag, throws.
+    private static func open(_ packet: Data, key: SymmetricKey, dir: String, accept: (UInt64) -> Bool) throws -> (UInt64, Data) {
+        let p = [UInt8](packet)
+        guard p.count >= 1 + 8 + 16 else { throw LinkError.badPacket("short record") }
+        let counter = p[1..<9].reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
+        guard accept(counter) else { throw LinkError.badPacket("record type \(p[0]) counter \(counter) refused") }
+        let box = try AES.GCM.SealedBox(nonce: nonce(dir, counter), ciphertext: Data(p[9..<(p.count - 16)]), tag: Data(p[(p.count - 16)...]))
+        return (counter, try AES.GCM.open(box, using: key, authenticating: Data(p[0..<9])))
+    }
+
     mutating func seal(_ plain: Data) throws -> Data {
-        guard sendCounter < (1 << 32) else { throw LinkError.badPacket("rekey needed") }
         let counter = sendCounter
         sendCounter += 1
-        let header = Data([Proto.data]).bigEndian(counter)
-        let box = try AES.GCM.seal(plain, using: sendKey, nonce: Self.nonce("i2a", counter), authenticating: header)
-        return header + box.ciphertext + box.tag
+        return try Self.seal(plain, type: Proto.data, counter: counter, key: sendKey, dir: "i2a")
     }
 
     /// Any replay, gap or bad tag throws, which ends the session.
     mutating func open(_ packet: Data) throws -> Data {
-        let p = [UInt8](packet)
-        guard p.count >= 1 + 8 + 16 else { throw LinkError.badPacket("short record") }
-        let counter = p[1..<9].reduce(UInt64(0)) { $0 << 8 | UInt64($1) }
-        guard counter == recvCounter else { throw LinkError.badPacket("counter \(counter), expected \(recvCounter)") }
-        let box = try AES.GCM.SealedBox(nonce: Self.nonce("a2i", counter), ciphertext: Data(p[9..<(p.count - 16)]), tag: Data(p[(p.count - 16)...]))
-        let plain = try AES.GCM.open(box, using: recvKey, authenticating: Data(p[0..<9]))
+        let expected = recvCounter
+        let (_, plain) = try Self.open(packet, key: recvKey, dir: "a2i") { $0 == expected }
         recvCounter += 1
+        return plain
+    }
+
+    /// One `AUDIO` record (`0x21 || counter || ciphertext || tag`) with the iPhone's own audio counter.
+    mutating func sealAudio(_ plain: Data) throws -> Data {
+        let counter = audioSendCounter
+        audioSendCounter += 1
+        return try Self.seal(plain, type: Proto.audio, counter: counter, key: sendKey, dir: "I2A")
+    }
+
+    /// Accepts any counter above the last one accepted. A repeat, an older counter or a bad tag throws, which ends the session.
+    mutating func openAudio(_ packet: Data) throws -> Data {
+        let next = audioRecvNext
+        let (counter, plain) = try Self.open(packet, key: recvKey, dir: "A2I") { $0 >= next }
+        audioRecvNext = counter + 1
         return plain
     }
 }

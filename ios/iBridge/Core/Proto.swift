@@ -19,6 +19,7 @@ enum Proto {
     static let sessionHello: UInt8 = 0x10
     static let sessionAccept: UInt8 = 0x11
     static let data: UInt8 = 0x20
+    static let audio: UInt8 = 0x21
     static let error: UInt8 = 0x7F
 
     static let modeQR: UInt8 = 0x01

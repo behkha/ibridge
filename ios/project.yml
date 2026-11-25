@@ -35,9 +35,11 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-        UIBackgroundModes: [bluetooth-central]
+        # audio: a call's sound keeps flowing with the screen locked. voip: CallKit refuses to report incoming calls without it.
+        UIBackgroundModes: [bluetooth-central, audio, voip]
         NSBluetoothAlwaysUsageDescription: iBridge talks to your Android phone over Bluetooth to bring its texts and calls here.
         NSCameraUsageDescription: iBridge scans the pairing code shown on your Android phone.
+        NSMicrophoneUsageDescription: iBridge carries your voice to the Android phone during a call.
         UIAppFonts: [Vazirmatn-Regular.ttf, Vazirmatn-Medium.ttf, Vazirmatn-SemiBold.ttf, Vazirmatn-Bold.ttf]
 schemes:
   iBridge:

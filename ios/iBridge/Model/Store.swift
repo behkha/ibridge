@@ -37,13 +37,26 @@ final class Store {
     /// Set by the central: sends what the outbox holds when the link is live.
     var onOutbox: (() -> Void)?
 
+    /// `status.audio` (PROTOCOL.md 8): `ready`, `setup`, `off` or `unsupported`; a missing one means `setup`.
+    /// Kept across launches so the keypad and Settings are right before the first `status`.
+    var audioState: String = UserDefaults.standard.string(forKey: "audio-state") ?? "setup" {
+        didSet { if !isDemo { UserDefaults.standard.set(audioState, forKey: "audio-state") } }
+    }
+
     var isDemo = false
     /// Demo only: the conversation to open on launch.
     var demoThread: String?
+    /// Demo only: the number on the keypad.
+    var demoNumber: String?
 
     // MARK: derived
 
     var peerName: String { peer?.name ?? status?.name ?? "Android" }
+
+    /// Android relays calls: incoming calls ring with CallKit, and the keypad and Calls tab can place calls.
+    var callsReady: Bool { peer != nil && audioState == "ready" }
+    /// Ready, and Android is in reach right now.
+    var canCall: Bool { callsReady && link == .linked }
 
     /// Stored texts plus the ones still in the outbox, shown as pending (sent to Android) or queued (waiting for it).
     private var allTexts: [SMS] {
@@ -109,6 +122,8 @@ final class Store {
         switch m.str("t") {
         case "status":
             status = PhoneStatus(m)
+            let audio = m.str("audio") ?? "setup"
+            if audioState != audio { audioState = audio }
         case "sms":
             if let s = SMS(m) { insert(s, notify: true); takeCode(m, sms: s); advance("sms", to: s.id) }
         case "sms.read":
@@ -273,6 +288,7 @@ final class Store {
         peer = p
         if dataOwner != p.publicKey {
             messages = [:]; calls = [:]; contacts = []; cursors = [:]; latestCode = nil; tints = [:]; outbox = []; pendingRead = []
+            audioState = "setup"
             dataOwner = p.publicKey
         }
         save()
@@ -286,6 +302,7 @@ final class Store {
         peer = nil
         link = .unpaired
         status = nil
+        audioState = "setup"
         PeerStore.save(nil)
     }
 
