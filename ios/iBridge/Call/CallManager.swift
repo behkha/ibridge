@@ -30,6 +30,7 @@ final class CallManager: NSObject {
         var connecting = false  // outgoing: CallKit told it started connecting
         var connected = false
         var seen = true         // Android mentioned it since the link last came up
+        var stated = false      // a `call.state` came for it: Android re-sends that state after relinking
     }
     private var relay: Relay?
     private var txSeq: UInt16 = 0
@@ -134,6 +135,7 @@ final class CallManager: NSObject {
         }
         r.call = id
         r.seen = true
+        r.stated = true
         if let s = m.int("stream"), s > 0, s < 256, r.stream != UInt8(s) {
             r.stream = UInt8(s)
             txSeq = 0
@@ -223,13 +225,15 @@ final class CallManager: NSObject {
     }
 
     /// Live again: Android re-sends `call.ring` / `call.state` for a call that still lasts. One it doesn't mention is over.
+    /// A call answered or dialed here with no `call.state` yet has nothing for Android to re-send: the answer and dial
+    /// timeouts decide that one.
     func linkLive() {
         guard relay != nil else { return }
         relay?.seen = false
         epoch += 1
         let e = epoch
         DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
-            guard let self, self.epoch == e, let r = self.relay, !r.seen else { return }
+            guard let self, self.epoch == e, let r = self.relay, !r.seen, r.stated || !(r.answered || r.outgoing) else { return }
             self.log.notice("Android didn't mention the call after relinking: it is over")
             self.provider.reportCall(with: r.uuid, endedAt: nil, reason: r.connected ? .remoteEnded : .failed)
             self.finish()
@@ -278,10 +282,11 @@ extension CallManager: CXProviderDelegate {
             relay = r
             provider.reportCall(with: r.uuid, updated: update(addr: r.addr, name: store.contactName(for: r.addr)))
             log.notice("call.dial sent")
-            // No `call.state` at all (an older Android build, a lost record): the call failed.
-            let e = epoch, uuid = r.uuid
+            // No `call.state` at all (an older Android build, a lost record): the call failed. Not tied to `epoch`,
+            // so a relink in between doesn't cancel it.
+            let uuid = r.uuid
             DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-                guard let self, self.epoch == e, let r = self.relay, r.uuid == uuid, r.call == nil else { return }
+                guard let self, let r = self.relay, r.uuid == uuid, !r.stated else { return }
                 self.log.notice("no call.state for call.dial in 15 s")
                 self.provider.reportCall(with: r.uuid, endedAt: nil, reason: .failed)
                 self.finish()
@@ -298,6 +303,15 @@ extension CallManager: CXProviderDelegate {
             relay?.answered = true
             action.fulfill()
             log.notice("call.answer sent")
+            // No `call.state` within 15 s (a lost record, a relink that dropped it): nobody hears this call, so it ends.
+            let uuid = r.uuid
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+                guard let self, let r = self.relay, r.uuid == uuid, !r.stated else { return }
+                self.log.notice("no call.state for call.answer in 15 s")
+                _ = self.send?(["t": "call.hangup", "call": id])
+                self.provider.reportCall(with: r.uuid, endedAt: nil, reason: .failed)
+                self.finish()
+            }
         }
     }
 
