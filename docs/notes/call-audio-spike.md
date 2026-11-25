@@ -67,3 +67,16 @@ Next, in order:
 
 Prior art read first: thtbee/nectarlink (`CallAudio.kt`), jemcik/JemRec (`CallProbe.java`, scrcpy FakeContext),
 amirwmr/tether (Galaxy A54 notes: same API on Exynos, not tried on a real PSTN call there), wangzan101/Mika, kevinzhow/Rungic.
+
+## Phase 2 result (2026-11-25, real calls, Galaxy in a pocket)
+- Incoming calls ring on the iPhone with CallKit, answered and spoken there; keypad tones and hang-up from the iPhone work.
+  Calls placed from the iPhone keypad ring out, connect and carry speech both ways. After each call the Galaxy is back to
+  mic unmuted, voice volume 8, MODE_NORMAL. ~50 frames/s each way, after the uplink jitter fix 0 frames dropped.
+- Mouth-to-ear latency, measured with the Mac playing test sounds into one phone and recording the other's speaker
+  (matched filter, 10 sounds per test; the Mac recorder needs `-af aresample=async=1` or it drops audio):
+  | Direction | Through iBridge | Normal call on the Galaxy | iBridge adds |
+  | --- | --- | --- | --- |
+  | caller → iPhone | 0.86 s (0.81–0.97) | 0.45 s | ~0.4 s |
+  | iPhone → caller | ~0.70 s (5 of 10 sounds agree; rough) | 0.36 s | ~0.35 s |
+- Known contributors to cut next: helper AudioTrack queue (~120 ms), helper uplink jitter queue (2–5 frames), iPhone
+  jitter buffer (3–5 frames), MediaCodec Opus batching, BLE connection interval (iOS default 30 ms).

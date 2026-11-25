@@ -16,7 +16,6 @@ Goal: our own iTell. Android holds the SIM; texts, contacts, calls and call aler
 - tools/interop/run.py: real Kotlin vs Swift protocol code, 4 scenarios pass. Steps to verify everything: .claude/skills/verify.
 - Toolchain: Temurin 21, Android SDK 35, Gradle 8.11.1, libimobiledevice, REA.
 - Verified on real phones 2026-11-24: send text, OTP code card, call alert + Decline, full history. OS bond added (encrypted GATT).
-- 2026-11-23: iPhone 17 (iOS 27.2.1) paired with the S21 Ultra by QR.
 - 2026-11-24: locked iPhone relinks by itself: out of range (~1 s) and Android restart (4-6 s; Android releases the leftover link, PROTOCOL §1). Text back verified. Notes: docs/notes/background-reconnect.md.
 - iPhone install: free Apple ID + AltServer 1.8.4 (notarized, ~/Applications), hold Option on its menu → Sideload .ipa → build-ipa/iBridge-unsigned.ipa from CI artifact `ios-ipa-unsigned`. Re-sign every 7 days. Wi-Fi path to AltServer is blocked here; USB works.
 - Repo public github.com/behkha/ibridge (user's choice; research/ stripped, no-reply email). CI `.github/workflows/build.yml`; iOS jobs often wait for Apple-silicon runners, re-run when cancelled.
@@ -34,7 +33,8 @@ Goal: our own iTell. Android holds the SIM; texts, contacts, calls and call aler
 2. Phase 2 (calls with audio) started 2026-11-25. Spike: docs/notes/call-audio-spike.md. Earpiece quiet only with mic mute + REDIRECT + voice volume min; outgoing calls behave like incoming.
    - Approved design (P2-Calls, https://claude.ai/artifact/BoADihwAZHdtpm9yRWbEx7, file design/mockups/P2-Calls.html): Android checklist row "Talk on your iPhone" + live-steps sheet + code typed in a notification reply; home warnings (Wi-Fi / Auto Blocker / unsupported); iPhone green call key (Text to its left), blue call-back icons, CallKit system screen only, Settings row only when calls aren't ready. Galaxy silent while the iPhone rings. Wi-Fi is available for helper starts.
    - Protocol drafted: PROTOCOL §2 priority, §5.1 AUDIO (0x21, own counters), §6 call.answer/dial/hangup/dtmf, call.state, bench, §8.
-   - Android done (15efaf3), verified on the Galaxy: real pairing by notification, helper as shell (loopback TCP 38217 + secret + uid check; SELinux blocks unix sockets), restart from Wireless debugging off in ~8 s, Opus round trip. Kadb 1.3.0, Kotlin 2.2.21. Not yet: real relayed call, reboot.
-   - In progress: iPhone CallKit + audio (worker branch). Then: interop AUDIO scenario, bench, real call both ways + latency, fresh-eyes review, verify skill steps.
+   - Built and verified on both phones (fdabaa1, 8c41a55, 6bdc182): incoming call answered on the iPhone, call out from the iPhone keypad, DTMF, hang-up, Galaxy restored after each call. Fresh-eyes review: 7 important findings fixed (helper proof via DUMP broadcast, relay only for the Galaxy's only call, safe decline, audio loss ends the call, RT-safe iOS audio, relink early in a call).
+   - Latency (docs/notes/call-audio-spike.md): caller → iPhone 0.86 s (normal call 0.45 s), iPhone → caller ~0.70 s (normal 0.36 s): iBridge adds ~0.35–0.4 s.
+   - Left: cut latency; Galaxy reboot test; screen-off/VoLTE vs 2G; call waiting is refused by design (both calls stay on the Galaxy).
 ## Open questions
 - Paid Apple account would allow TestFlight (7-day free signing is fine for now).
