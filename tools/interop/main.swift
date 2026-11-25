@@ -16,6 +16,11 @@ if args[1] == "parse" {
     log("parsed key \(key.count) bytes, token \(token.count) bytes, name \(name)"); exit(0)
 }
 let start: PairingStart = args[1] == "qr" ? PairingStart.parse(args[2])! : .code(args[2])
+/// `qr <uri> bench`: after pairing, run PROTOCOL.md's `bench` over AUDIO records instead of the page check.
+let benchMode = args.count > 3 && args[3] == "bench"
+let benchN = 30
+var benchGot = 0
+var lastSeq = -1
 let h = Handshake(identity: MemoryKey(), myName: "iPhone 15")
 var framer = Framer()
 var deframer = Deframer()
@@ -45,7 +50,8 @@ func handle(_ events: [Handshake.Event]) {
         case .paired(let peer): log("paired with \(peer.name)")
         case .live:
             log("live")
-            send(try! h.seal(["t": "sync", "kind": "sms", "cursor": NSNull(), "limit": 200])!)
+            if benchMode { send(try! h.seal(["t": "bench", "n": benchN, "size": 60])!) }
+            else { send(try! h.seal(["t": "sync", "kind": "sms", "cursor": NSNull(), "limit": 200])!) }
         case .message(let m):
             log("got \(m["t"] ?? "?")")
             if m["t"] as? String == "page" {
@@ -54,8 +60,19 @@ func handle(_ events: [Handshake.Event]) {
                 send(try! h.seal(["t": "ping"])!)
             }
             if m["t"] as? String == "pong" { log("OK"); exit(0) }
+            if m["t"] as? String == "bench.done" {
+                guard benchGot == benchN, m["n"] as? Int == benchN else { log("ERROR bench.done n=\(m["n"] ?? "?") after \(benchGot) in"); exit(2) }
+                log("OK bench \(benchN) each way"); exit(0)
+            }
         case .audio(let plain):
-            log("got AUDIO \(plain.count) bytes")
+            guard benchMode, plain.count == 3 + 60, plain[0] == 0 else { log("ERROR unexpected AUDIO \(plain.count) bytes"); exit(2) }
+            let seq = Int(plain[1]) << 8 | Int(plain[2])
+            guard seq > lastSeq else { log("ERROR AUDIO seq \(seq) after \(lastSeq)"); exit(2) }
+            lastSeq = seq
+            benchGot += 1
+            if benchGot == benchN {
+                for i in 0..<benchN { send(try! h.sealAudio(Data([0, UInt8(i >> 8), UInt8(i & 0xFF)]) + Data(repeating: 7, count: 60))!) }
+            }
         }
     }
 }

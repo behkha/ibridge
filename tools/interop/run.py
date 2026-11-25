@@ -38,6 +38,7 @@ results = [
     scenario("QR pairing, session, 40-item page, ping", lambda w: ["qr", w["uri"]], 0, 0),
     scenario("typed code pairing, session, page, ping", lambda w: ["code", w["code"]], 0, 0),
     scenario("wrong code is refused in round 0", lambda w: ["code", wrong(w["code"])], 2, 3),
+    scenario("bench: AUDIO records both ways, Android skips counters", lambda w: ["qr", w["uri"], "bench"], 0, 0),
     scenario("wrong last character is refused in round 4", lambda w: ["code", w["code"][:5] + wrong(w["code"][5])], 2, 3),
 ]
 sys.exit(0 if all(results) else 1)
