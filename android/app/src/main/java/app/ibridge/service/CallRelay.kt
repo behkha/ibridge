@@ -155,7 +155,8 @@ class CallRelay(
                 val c = call
                 val err = e.optString("err")
                 if (e.optBoolean("on") && c != null && c.relay == null) {
-                    c.relay = Relay(c.stream) { plain -> gatt.post { gatt.sendAudio(plain) } }.also { it.start() }
+                    c.relay = Relay(c.stream) { plain, queued -> gatt.post { queued(); gatt.sendAudio(plain) } }.also { it.start() }
+                    gatt.setFastLink(true)
                     Log.i(TAG, "call ${c.id}: audio flowing")
                 } else if (!e.optBoolean("on")) {
                     if (err.isNotEmpty()) Log.w(TAG, "call ${c?.id}: audio failed: $err")
@@ -165,9 +166,13 @@ class CallRelay(
             }
             "stats" -> call?.let { c ->
                 val r = c.relay
+                // Lags are avg/max ms per stage: encode = PCM from the helper to the link queue, queue = waiting for the
+                // radio, sent = notification until the stack took it, decode = AUDIO from the iPhone to PCM at the helper.
                 Log.i(TAG, "relay ${c.id}: sent ${r?.sent?.getAndSet(0)} received ${r?.received?.getAndSet(0)} " +
-                    "dropped ${gatt.audioDropped - droppedBefore} late ${r?.late?.getAndSet(0)} link queue ${gatt.audioQueued} | " +
-                    "helper down ${e.optInt("down")} up ${e.optInt("up")} silent ${e.optInt("silent")} upQueue ${e.optInt("upQueue")} upDropped ${e.optInt("upDropped")}")
+                    "dropped ${gatt.audioDropped - droppedBefore} late ${r?.late?.getAndSet(0)} link queue ${gatt.audioQueued} " +
+                    "interval ${gatt.intervalMs} | lag encode ${r?.encodeLag?.take()} queue ${gatt.audioWait.take()} sent ${gatt.audioSent.take()} " +
+                    "decode ${r?.decodeLag?.take()} | helper down ${e.optInt("down")} up ${e.optInt("up")} silent ${e.optInt("silent")} " +
+                    "upQueue ${e.optString("upQueue")} upDropped ${e.optInt("upDropped")} track ${e.optString("track")} underruns ${e.optInt("underruns")}")
                 droppedBefore = gatt.audioDropped
             }
             "error" -> {
@@ -202,6 +207,7 @@ class CallRelay(
         if (call !== c) return
         call = null
         c.relay?.stop()
+        gatt.setFastLink(false)
         CallAudio.command(JSONObject().put("c", "relay").put("on", false))
         push(end(c.id, how, c.req))
         Log.i(TAG, "call ${c.id}: $how after ${(System.currentTimeMillis() - c.since) / 1000} s")
@@ -265,8 +271,19 @@ class CallRelay(
         benchExpect = 0
     }
 
+    /** Debug (`AUDIO_TUNE`, PROTOCOL.md 6): ask for a short connection interval now, or the balanced one. */
+    fun tuneLink(on: Boolean) = gatt.setFastLink(on)
+
+    /** Debug (`AUDIO_TUNE`): the iPhone's jitter buffer and audio I/O sizes, as `audio.tune`. */
+    fun tunePhone(m: JSONObject) = gatt.post { push(m) }
+
+    init { current = this }
+
     companion object {
         const val TAG = "iBridge"
         val IDLE = Triple(0, 0, 0)
+        /** For the debug `AUDIO_TUNE` broadcast. */
+        @Volatile var current: CallRelay? = null
+            private set
     }
 }

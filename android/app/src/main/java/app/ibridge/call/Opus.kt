@@ -23,7 +23,10 @@ class OpusEncoder {
         codec.start()
     }
 
-    /** One 20 ms PCM frame in; the Opus packets that came out (usually one, sometimes a frame late). */
+    /**
+     * One 20 ms PCM frame in; the Opus packets that came out. The codec works on its own thread: wait up to [OUTPUT_WAIT_US]
+     * for this frame's packet, or it would leave with the next frame, 20 ms late.
+     */
     fun encode(pcm: ByteArray): List<ByteArray> {
         val i = codec.dequeueInputBuffer(20_000)
         if (i >= 0) {
@@ -37,7 +40,7 @@ class OpusEncoder {
     private fun drain(): List<ByteArray> {
         val out = ArrayList<ByteArray>(1)
         while (true) {
-            val o = codec.dequeueOutputBuffer(info, 2_000)
+            val o = codec.dequeueOutputBuffer(info, if (out.isEmpty()) OUTPUT_WAIT_US else 0)
             if (o < 0) { if (o == MediaCodec.INFO_TRY_AGAIN_LATER) break else continue }
             if (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0 && info.size > 0) {
                 val b = codec.getOutputBuffer(o)!!
@@ -77,7 +80,7 @@ class OpusDecoder {
 
     private fun le64(v: Long): ByteBuffer = ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(v).apply { flip() }
 
-    /** One packet in; the 20 ms 16 kHz s16le frames that came out. */
+    /** One packet in; the 20 ms 16 kHz s16le frames that came out (waiting up to [OUTPUT_WAIT_US] for this packet's). */
     fun decode(opus: ByteArray): List<ByteArray> {
         val i = codec.dequeueInputBuffer(20_000)
         if (i >= 0) {
@@ -87,7 +90,7 @@ class OpusDecoder {
         }
         val frames = ArrayList<ByteArray>(1)
         while (true) {
-            val o = codec.dequeueOutputBuffer(info, 2_000)
+            val o = codec.dequeueOutputBuffer(info, if (frames.isEmpty()) OUTPUT_WAIT_US else 0)
             if (o == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) { rate = codec.outputFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE); continue }
             if (o < 0) { if (o == MediaCodec.INFO_TRY_AGAIN_LATER) break else continue }
             if (info.size > 0) {
@@ -117,6 +120,9 @@ class OpusDecoder {
 
     fun release() { runCatching { codec.stop() }; codec.release() }
 }
+
+/** How long a codec call waits for the packet or frame it was just given; less than a frame, so it never falls behind. */
+private const val OUTPUT_WAIT_US = 12_000L
 
 /**
  * One second of a 440 Hz tone through the encoder and back through the decoder: packets per frame, their size, and how

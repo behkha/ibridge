@@ -42,7 +42,10 @@ class Gatt(
     private val newEngine: (send: (ByteArray) -> Unit, onLive: () -> Unit) -> LinkEngine,
     private val onDisconnected: () -> Unit,
 ) {
-    private val worker = Executors.newSingleThreadScheduledExecutor { Thread(it, "ibridge-gatt") }
+    /** Audio priority: a relayed call's frames pass through here every 20 ms. */
+    private val worker = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread({ android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_AUDIO); r.run() }, "ibridge-gatt")
+    }
 
     /** Runs [block] on the worker. A throw is logged and drops the link; it never kills the app. */
     fun post(delayMs: Long = 0, block: () -> Unit) {
@@ -68,6 +71,18 @@ class Gatt(
     private val outbox = ArrayDeque<ByteArray>()
     /** Plain `AUDIO` frames waiting, at most [AUDIO_QUEUE]; sealed when they start, so dropped ones use no counter. */
     private val audioOut = ArrayDeque<ByteArray>()
+    /** When each of [audioOut] was queued (nanoTime), for [audioWait]. */
+    private val audioAt = ArrayDeque<Long>()
+    /** Time an `AUDIO` frame waited here before its notification, and from the notification to the stack taking it. */
+    val audioWait = app.ibridge.call.Lag()
+    val audioSent = app.ibridge.call.Lag()
+    private var audioNotifiedAt = 0L
+    /** A GATT client on the iPhone's link, held only to ask for a short connection interval during a call ([setFastLink]). */
+    private var linkClient: BluetoothGatt? = null
+    private var fastLink = false
+    /** The link's connection interval in ms, from the stack (0 until it reports one). */
+    @Volatile var intervalMs = 0.0
+        private set
     /** Chunks of the packet being sent. */
     private val chunks = ArrayDeque<ByteArray>()
     private var inFlight = false
@@ -127,6 +142,7 @@ class Gatt(
 
     fun stop() = post {
         stopAdvertising()
+        closeLinkClient()
         device?.let { server?.cancelConnection(it) }
         server?.close()
         server = null
@@ -176,8 +192,8 @@ class Gatt(
     /** Queues one `AUDIO` plaintext ahead of other packets; keeps the newest [AUDIO_QUEUE]. Call on [worker]. */
     fun sendAudio(plain: ByteArray) {
         if (device == null || engine?.isLive != true) return
-        audioOut.add(plain)
-        while (audioOut.size > AUDIO_QUEUE) { audioOut.removeFirst(); audioDropped++ }
+        audioOut.add(plain); audioAt.add(System.nanoTime())
+        while (audioOut.size > AUDIO_QUEUE) { audioOut.removeFirst(); audioAt.removeFirst(); audioDropped++ }
         pump()
     }
 
@@ -186,8 +202,9 @@ class Gatt(
 
     private fun nextPacket(): ByteArray? {
         val e = engine
-        val audio = audioOut.poll() ?: audioSource?.invoke()
-        if (audio != null && e != null) e.sealAudio(audio)?.let { return it }
+        val queued = audioOut.poll()?.also { audioWait.add(audioAt.poll()!!) }
+        val audio = queued ?: audioSource?.invoke()
+        if (audio != null && e != null) e.sealAudio(audio)?.let { if (queued != null) audioNotifiedAt = System.nanoTime(); return it }
         return outbox.poll()
     }
 
@@ -225,6 +242,7 @@ class Gatt(
     }
 
     private fun resetConnection() {
+        closeLinkClient()
         engine?.close()
         device = null
         subscribed = false
@@ -233,6 +251,8 @@ class Gatt(
         framer = Framer()
         outbox.clear()
         audioOut.clear()
+        audioAt.clear()
+        audioNotifiedAt = 0
         chunks.clear()
         audioSource = null
         inFlight = false
@@ -240,6 +260,7 @@ class Gatt(
     }
 
     private fun drop(d: BluetoothDevice) {
+        closeLinkClient() // first: while it holds the link, cancelConnection would not end it
         server?.cancelConnection(d)
         resetConnection()
         onDisconnected()
@@ -253,6 +274,38 @@ class Gatt(
         // Best effort: queue the ERROR, then drop once it has had a moment to go out.
         sendPacket(LinkEngine.error(e.error, e.message ?: ""))
         post(delayMs = 300) { if (device == d) drop(d) }
+    }
+
+    /**
+     * A relayed call asks for the shortest connection interval the iPhone grants (iOS defaults to 30 ms, which holds each
+     * `AUDIO` frame up to 30 ms and makes them arrive in bursts). Only a GATT client can ask, so one is opened on the
+     * iPhone's link and kept until the link ends: closing it would leave no app holding the link, and the stack would
+     * drop it a second later (the same rule [releaseLeftoverLink] uses). Off asks for the balanced interval again.
+     */
+    fun setFastLink(on: Boolean) = post {
+        fastLink = on
+        val d = device ?: return@post
+        val c = linkClient
+        if (c != null) { priority(c); return@post }
+        if (!on) return@post
+        linkClient = d.connectGatt(context, false, linkCallback, BluetoothDevice.TRANSPORT_LE)
+    }
+
+    private fun priority(c: BluetoothGatt) {
+        val ok = c.requestConnectionPriority(if (fastLink) BluetoothGatt.CONNECTION_PRIORITY_HIGH else BluetoothGatt.CONNECTION_PRIORITY_BALANCED)
+        Log.i(TAG, "link: asked for a ${if (fastLink) "short" else "balanced"} connection interval ($ok)")
+    }
+
+    private fun closeLinkClient() {
+        linkClient?.let { it.disconnect(); it.close() }
+        linkClient = null
+    }
+
+    private val linkCallback = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) = post {
+            if (g !== linkClient) return@post
+            if (newState == BluetoothProfile.STATE_CONNECTED) priority(g) else { g.close(); linkClient = null }
+        }
     }
 
     /** The iPhone that last held a live session, so a later run can find it on a leftover link. */
@@ -355,7 +408,16 @@ class Gatt(
             }
         }
 
+        /** Hidden in the SDK but called by the stack on every link (an override by name): the interval in 1.25 ms units. */
+        @Suppress("unused")
+        fun onConnectionUpdated(d: BluetoothDevice, interval: Int, latency: Int, timeout: Int, status: Int) = post {
+            if (d != device) return@post
+            intervalMs = interval * 1.25
+            Log.i(TAG, "link: connection interval $intervalMs ms, latency $latency, timeout ${timeout * 10} ms (status $status)")
+        }
+
         override fun onNotificationSent(d: BluetoothDevice, status: Int) = post {
+            if (audioNotifiedAt != 0L) { audioSent.add(audioNotifiedAt); audioNotifiedAt = 0 }
             inFlight = false
             if (status != BluetoothGatt.GATT_SUCCESS) Log.w(TAG, "notification status $status")
             pump()

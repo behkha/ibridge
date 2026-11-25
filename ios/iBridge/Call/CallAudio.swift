@@ -8,8 +8,8 @@ import os
 /// The sink and render callbacks run on the real-time audio thread: they never allocate, free, dispatch or wait on a lock
 /// held for more than a fixed-size copy. They only touch `MicRing` and `JitterBuffer`, whose storage is allocated up front.
 final class CallAudio: @unchecked Sendable {
-    /// One encoded 20 ms frame, called on the capture queue.
-    var onFrame: ((Data) -> Void)?
+    /// One encoded 20 ms frame and when it was ready (uptime ns), called on the capture queue.
+    var onFrame: ((Data, UInt64) -> Void)?
 
     /// Muted: silence frames keep going so `seq` keeps running.
     var muted: Bool {
@@ -41,6 +41,10 @@ final class CallAudio: @unchecked Sendable {
     private var resampler: AVAudioConverter?
     private var encoder: AVAudioConverter?
     private var fifo: [Float] = []
+    /// Frames given to the encoder and packets it returned: a gap means it holds sound back.
+    private var encoderIn = 0
+    private var encoderOut = 0
+    private let micWait = Lag()
     // Receive queue only.
     private var decoder: AVAudioConverter?
 
@@ -117,7 +121,8 @@ final class CallAudio: @unchecked Sendable {
             shared.withLock { $0.running = true; $0.micFrames = 0 }
             startPump()
             startLog()
-            log.notice("audio started: mic \(Int(inFormat.sampleRate), privacy: .public) Hz × \(channels, privacy: .public), Opus 16 kHz 20 ms")
+            let session = AVAudioSession.sharedInstance()
+            log.notice("audio started: mic \(Int(inFormat.sampleRate), privacy: .public) Hz × \(channels, privacy: .public), Opus 16 kHz 20 ms; session \(Int(session.sampleRate), privacy: .public) Hz, I/O \(Self.ms(session.ioBufferDuration), privacy: .public) ms, input \(Self.ms(session.inputLatency), privacy: .public) ms, output \(Self.ms(session.outputLatency), privacy: .public) ms, presentation in \(Self.ms(input.presentationLatency), privacy: .public) out \(Self.ms(self.engine.outputNode.presentationLatency), privacy: .public) ms")
         } catch {
             log.error("audio start failed: \(String(describing: error), privacy: .public)")
             teardown()
@@ -136,9 +141,29 @@ final class CallAudio: @unchecked Sendable {
         jitter.reset()
     }
 
+    /// Debug `audio.tune` (PROTOCOL.md 6): the jitter buffer's start depth and spare frames, the audio I/O buffer.
+    func tune(start: Int?, spare: Int?, ioMs: Int?) {
+        jitter.tune(start: start, spare: spare)
+        if let ioMs {
+            try? AVAudioSession.sharedInstance().setPreferredIOBufferDuration(Double(min(max(ioMs, 2), 40)) / 1000)
+        }
+        log.notice("tune: jitter start \(start ?? -1, privacy: .public) spare \(spare ?? -1, privacy: .public), I/O \(ioMs ?? -1, privacy: .public) ms → \(Self.ms(AVAudioSession.sharedInstance().ioBufferDuration), privacy: .public) ms")
+    }
+
+    /// Queued `AUDIO` frames: from the encoder to the radio (the central adds to it).
+    let sendLag = Lag()
+    /// Receive queue only: from the link to the jitter buffer, and the longest wait between two frames.
+    private let decodeLag = Lag()
+    private var lastArrival: UInt64 = 0
+    private var arrivalGap: UInt64 = 0
+    private var shortDecodes = 0
+
     /// One received Opus packet with its `seq`.
     func receive(seq: UInt16, opus packet: Data) {
+        let at = DispatchTime.now().uptimeNanoseconds
         rx.async { [self] in
+            if lastArrival > 0 { arrivalGap = max(arrivalGap, at &- lastArrival) }
+            lastArrival = at
             guard shared.withLock({ $0.running }), let decoder, !packet.isEmpty else { return }
             let input = AVAudioCompressedBuffer(format: opus, packetCapacity: 1, maximumPacketSize: packet.count)
             packet.copyBytes(to: input.data.assumingMemoryBound(to: UInt8.self), count: packet.count)
@@ -155,16 +180,18 @@ final class CallAudio: @unchecked Sendable {
                 return input
             }
             if status == .error { log.error("Opus decode failed: \(String(describing: error), privacy: .public)") }
+            if Int(out.frameLength) != Self.frameLength { shortDecodes += 1 }
             jitter.push(seq: seq, samples: out.floatChannelData![0], count: Int(out.frameLength))
+            decodeLag.add(since: at)
         }
     }
 
     // MARK: capture
 
-    /// Every 10 ms on the capture queue: takes what the microphone wrote to the ring.
+    /// Every 5 ms on the capture queue: takes what the microphone wrote to the ring.
     private func startPump() {
         let t = DispatchSource.makeTimerSource(queue: tx)
-        t.schedule(deadline: .now() + .milliseconds(10), repeating: .milliseconds(10), leeway: .milliseconds(2))
+        t.schedule(deadline: .now() + .milliseconds(5), repeating: .milliseconds(5), leeway: .milliseconds(1))
         t.setEventHandler { [weak self] in self?.encode() }
         t.resume()
         pump = t
@@ -173,7 +200,10 @@ final class CallAudio: @unchecked Sendable {
     /// Capture queue: resample to 16 kHz, cut 20 ms frames, encode each.
     private func encode() {
         guard let mic, let micBuffer, let resampler, let encoder else { return }
+        let tick = DispatchTime.now().uptimeNanoseconds
         let (count, dropped) = mic.read(into: micBuffer.floatChannelData![0], limit: Int(micBuffer.frameCapacity))
+        // The oldest sample just read waited this long in the ring (an estimate from the count).
+        if count > 0 { micWait.add(since: tick &- UInt64(Double(count) / micBuffer.format.sampleRate * 1e9)) }
         if dropped > 0 { log.error("microphone ring full: \(dropped, privacy: .public) samples dropped") }
         guard count > 0 else { return }
         micBuffer.frameLength = AVAudioFrameCount(count)
@@ -205,13 +235,17 @@ final class CallAudio: @unchecked Sendable {
                 s.pointee = .haveData
                 return frame
             }
+            encoderIn += 1
             guard status != .error, packet.packetCount > 0, packet.byteLength > 0 else { continue }
+            encoderOut += Int(packet.packetCount)
             shared.withLock { $0.micFrames += 1 }
-            onFrame?(Data(bytes: packet.data, count: Int(packet.byteLength)))
+            onFrame?(Data(bytes: packet.data, count: Int(packet.byteLength)), DispatchTime.now().uptimeNanoseconds)
         }
     }
 
     // MARK: helpers
+
+    static func ms(_ seconds: TimeInterval) -> String { String(format: "%.1f", seconds * 1000) }
 
     private func teardown() {
         timer?.cancel()
@@ -226,8 +260,9 @@ final class CallAudio: @unchecked Sendable {
         try? engine.inputNode.setVoiceProcessingEnabled(false)
         tx.async { [weak self] in
             self?.fifo = []; self?.resampler = nil; self?.encoder = nil; self?.mic = nil; self?.micBuffer = nil
+            self?.encoderIn = 0; self?.encoderOut = 0
         }
-        rx.async { [weak self] in self?.decoder = nil }
+        rx.async { [weak self] in self?.decoder = nil; self?.lastArrival = 0; self?.arrivalGap = 0 }
     }
 
     /// Once a second while a call runs: frames in/out of the jitter buffer, its depth, concealed and late frames.
@@ -236,9 +271,16 @@ final class CallAudio: @unchecked Sendable {
         t.schedule(deadline: .now() + 1, repeating: 1)
         t.setEventHandler { [weak self] in
             guard let self else { return }
-            let (s, depth) = self.jitter.takeStats()
+            let s = self.jitter.takeStats()
             let mic = self.shared.withLock { s -> Int in defer { s.micFrames = 0 }; return s.micFrames }
-            self.log.notice("audio: in \(s.framesIn, privacy: .public) out \(s.framesOut, privacy: .public) depth \(depth, privacy: .public) concealed \(s.concealed, privacy: .public) late \(s.late, privacy: .public) dropped \(s.dropped, privacy: .public) added \(s.added, privacy: .public) mic \(mic, privacy: .public)")
+            let (encoderHeld, micWait) = self.tx.sync { (self.encoderIn - self.encoderOut, self.micWait.take()) }
+            let gap = self.arrivalGap / 1_000_000
+            self.arrivalGap = 0
+            let short = self.shortDecodes
+            self.shortDecodes = 0
+            // Lags are avg/max ms: mic = waiting in the microphone ring, send = encoded until written to the radio,
+            // decode = received until in the jitter buffer; depth = frames left after each take (min/avg/max).
+            self.log.notice("audio: in \(s.framesIn, privacy: .public) out \(s.framesOut, privacy: .public) depth \(s.depth, privacy: .public) concealed \(s.concealed, privacy: .public) late \(s.late, privacy: .public) dropped \(s.dropped, privacy: .public) trimmed \(s.trimmed, privacy: .public) mic \(mic, privacy: .public) | gap \(gap, privacy: .public) ms, lag mic \(micWait, privacy: .public) send \(self.sendLag.take(), privacy: .public) decode \(self.decodeLag.take(), privacy: .public), encoder holds \(encoderHeld, privacy: .public), short decodes \(short, privacy: .public)")
         }
         t.resume()
         timer = t
@@ -294,21 +336,31 @@ final class MicRing: @unchecked Sendable {
     }
 }
 
-/// Playout of received frames (PROTOCOL.md 8, "Timing"): starts once 60 ms are buffered, conceals a missing frame
-/// with a short fade, and when the two clocks drift drops or adds one frame at a quiet moment.
-/// `push`, `reset` and `takeStats` from the receive queue or main, `render` from the real-time thread. Frames live in
+/// Playout of received frames (PROTOCOL.md 8, "Timing"): starts once `start` frames are buffered, conceals a missing frame
+/// with a short fade, and keeps itself as shallow as the link allows: a frame that is late is waited for (the buffer grows
+/// by one), and when for 1 s there were always more than `spare` frames left after each take, that many extra frames are
+/// dropped, each at a quiet moment (or within half a second). So a burst after a link stall is gone in a second or two,
+/// and clock drift is absorbed the same way.
+/// `push`, `reset`, `tune` and `takeStats` from the receive queue or main, `render` from the real-time thread. Frames live in
 /// slots allocated once; the lock is held for at most one call's worth of samples and fixed-size frame copies, never
 /// around an allocation, a free or a decode.
 final class JitterBuffer: @unchecked Sendable {
-    static let target = 3 // frames: 60 ms
+    static let maxSkip = 3 // frames the sender may drop that are concealed in place; a longer gap jumps to the newest
     static let capacity = 25 // frames: half a second after a stall, keep the newest
-    struct Stats { var framesIn = 0, framesOut = 0, concealed = 0, late = 0, dropped = 0, added = 0 }
+    struct Stats { var framesIn = 0, framesOut = 0, concealed = 0, late = 0, dropped = 0, trimmed = 0, depth = "-" }
 
     private let state = OSAllocatedUnfairLock(uncheckedState: State())
 
     deinit { state.withLockUnchecked { $0.free() } }
 
     func reset() { state.withLockUnchecked { $0.reset() } }
+
+    func tune(start: Int?, spare: Int?) {
+        state.withLockUnchecked { s in
+            if let start { s.start = min(max(start, 1), 10) }
+            if let spare { s.spare = min(max(spare, 0), 10) }
+        }
+    }
 
     /// One decoded frame. Short ones are padded with silence, an empty one is a silent frame.
     func push(seq: UInt16, samples: UnsafePointer<Float>, count: Int) {
@@ -321,11 +373,13 @@ final class JitterBuffer: @unchecked Sendable {
         state.withLockUnchecked { $0.render(out, count) }
     }
 
-    /// The counters since the last call, and the depth in frames.
-    func takeStats() -> (Stats, Int) {
+    /// The counters since the last call; `depth` is the frames left after each take, min/avg/max.
+    func takeStats() -> Stats {
         state.withLockUnchecked { s in
-            defer { s.stats = .init() }
-            return (s.stats, s.count)
+            defer { s.stats = .init(); s.depthN = 0; s.depthSum = 0; s.depthMin = .max; s.depthMax = 0 }
+            var r = s.stats
+            if s.depthN > 0 { r.depth = "\(s.depthMin)/\(String(format: "%.1f", Double(s.depthSum) / Double(s.depthN)))/\(s.depthMax)" }
+            return r
         }
     }
 
@@ -345,6 +399,9 @@ final class JitterBuffer: @unchecked Sendable {
         let quiet = UnsafeMutablePointer<Bool>.allocate(capacity: slots)
         let cur = UnsafeMutablePointer<Float>.allocate(capacity: len)  // the frame playing
         let last = UnsafeMutablePointer<Float>.allocate(capacity: len) // the last frame played, for concealment
+        /// Frames buffered before playing starts (40 ms), and frames kept in hand beyond the one playing. Kept across calls.
+        var start = 2
+        var spare = 1
         var head = 0
         var count = 0
         var stats = Stats()
@@ -353,14 +410,14 @@ final class JitterBuffer: @unchecked Sendable {
         var pos = 0
         var fade = false
         var hasLast = false
-        var lastQuiet = true
         var missRun = 0
         var lateRun = 0
-        var depthSum = 0
-        var depthCount = 0
-        /// +1: drop one frame at a quiet moment; -1: add one; 0: on target.
+        /// The fewest frames left after a take in this 1 s window, and how many frames are still to be dropped.
+        var windowMin = Int.max
+        var takes = 0
         var trim = 0
         var trimWait = 0
+        var depthN = 0, depthSum = 0, depthMin = Int.max, depthMax = 0
 
         init() {
             pcm.initialize(repeating: 0, count: Self.slots * Self.len)
@@ -377,8 +434,9 @@ final class JitterBuffer: @unchecked Sendable {
         mutating func reset() {
             head = 0; count = 0; stats = Stats(); next = 0; playing = false
             cur.update(repeating: 0, count: Self.len); pos = 0; fade = false
-            hasLast = false; lastQuiet = true; missRun = 0; lateRun = 0
-            depthSum = 0; depthCount = 0; trim = 0; trimWait = 0
+            hasLast = false; missRun = 0; lateRun = 0
+            windowMin = .max; takes = 0; trim = 0; trimWait = 0
+            depthN = 0; depthSum = 0; depthMin = .max; depthMax = 0
         }
 
         mutating func push(seq: UInt16, samples: UnsafePointer<Float>, count n: Int, quiet q: Bool) {
@@ -433,41 +491,36 @@ final class JitterBuffer: @unchecked Sendable {
         /// Puts the next frame to play in `cur`.
         private mutating func nextFrame() {
             if !playing {
-                guard count >= JitterBuffer.target else { return silence() }
+                guard count >= start else { return silence() }
                 playing = true
                 next = seqs[head]
                 missRun = 0
             }
-            measureDrift()
-            if trim < 0, lastQuiet || trimWait > 50 { // behind: one frame of silence
-                trim = 0
-                stats.added += 1
-                return silence()
-            }
             while true {
-                guard count > 0 else { return conceal(skip: false) } // late: wait for it
+                guard count > 0 else { return conceal(skip: false) } // late: wait for it (the buffer grows by one)
                 let seq = seqs[head]
                 let gap = Int(Int16(bitPattern: seq &- next))
                 if gap > 0 {
-                    if gap <= JitterBuffer.target { return conceal(skip: true) } // the sender dropped a few frames
+                    if gap <= JitterBuffer.maxSkip { return conceal(skip: true) } // the sender dropped a few frames
                     next = seq // a long stall: go on with the newest sound
                 }
                 let slot = head
                 head = (head + 1) % Self.slots
                 count -= 1
                 next = seq &+ 1
-                if trim > 0, count >= JitterBuffer.target - 1, quiet[slot] || trimWait > 50 { // ahead: skip one frame
-                    trim = 0
-                    stats.dropped += 1
+                if trim > 0, count > 0, quiet[slot] || trimWait > 25 { // ahead: skip one frame, quietly if it can
+                    trim -= 1
+                    trimWait = 0
+                    stats.trimmed += 1
                     continue
                 }
+                measure()
                 stats.framesOut += 1
                 missRun = 0
                 // The slot is free once the lock is released: copy it out now.
                 cur.update(from: pcm + slot * Self.len, count: Self.len)
                 last.update(from: cur, count: Self.len)
                 hasLast = true
-                lastQuiet = quiet[slot]
                 return
             }
         }
@@ -481,6 +534,8 @@ final class JitterBuffer: @unchecked Sendable {
             if skip { next &+= 1 }
             stats.concealed += 1
             missRun += 1
+            windowMin = 0 // the buffer ran dry: no trimming in this window
+            trim = 0
             if missRun > 10 { playing = false }
             if missRun == 1, hasLast {
                 fade = true
@@ -490,19 +545,37 @@ final class JitterBuffer: @unchecked Sendable {
             silence()
         }
 
-        /// Every 2 s: an average depth well off 60 ms means the clocks drift; correct it by one frame.
-        private mutating func measureDrift() {
-            depthSum += count
-            depthCount += 1
-            if trim != 0 { trimWait += 1 }
-            guard depthCount >= 100 else { return }
-            let avg = Double(depthSum) / Double(depthCount)
-            if trim == 0 {
-                if avg > Double(JitterBuffer.target) + 1.5 { trim = 1; trimWait = 0 }
-                else if avg < Double(JitterBuffer.target) - 1.5 { trim = -1; trimWait = 0 }
-            }
-            depthSum = 0
-            depthCount = 0
+        /// After each take: every second, frames always left beyond `spare` are delay the link does not need; drop them.
+        private mutating func measure() {
+            depthN += 1; depthSum += count; depthMin = min(depthMin, count); depthMax = max(depthMax, count)
+            windowMin = min(windowMin, count)
+            if trim > 0 { trimWait += 1 }
+            takes += 1
+            guard takes >= 50 else { return }
+            if trim == 0, windowMin > spare { trim = windowMin - spare; trimWait = 0 }
+            takes = 0
+            windowMin = .max
+        }
+    }
+}
+
+/// How long one stage held its frames, for the once-a-second log: "avg/max" in ms, "-" when none passed. Any thread
+/// except the real-time one.
+final class Lag: @unchecked Sendable {
+    private struct Sums { var n = 0; var sum: UInt64 = 0; var max: UInt64 = 0 }
+    private let sums = OSAllocatedUnfairLock(initialState: Sums())
+
+    /// `since`: uptime nanoseconds when the frame entered the stage.
+    func add(since: UInt64) {
+        let d = DispatchTime.now().uptimeNanoseconds &- since
+        guard d < 10_000_000_000 else { return }
+        sums.withLock { s in s.n += 1; s.sum += d; s.max = Swift.max(s.max, d) }
+    }
+
+    func take() -> String {
+        sums.withLock { s in
+            defer { s = Sums() }
+            return s.n == 0 ? "-" : "\(s.sum / UInt64(s.n) / 1_000_000)/\(s.max / 1_000_000)"
         }
     }
 }

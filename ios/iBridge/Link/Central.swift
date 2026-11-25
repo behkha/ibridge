@@ -59,7 +59,7 @@ final class Central: NSObject {
         calls = CallManager(store: store)
         super.init()
         calls.send = { [weak self] m in self?.send(m) ?? false }
-        calls.sendAudio = { [weak self] plain in self?.sendAudio(plain) }
+        calls.sendAudio = { [weak self] plain, at in self?.sendAudio(plain, at: at) }
         retired = Keychain.read("ibridge-retired").flatMap { try? JSONDecoder().decode(PairedPeer.self, from: $0) }
         manager = CBCentralManager(delegate: self, queue: .main, options: [CBCentralManagerOptionRestoreIdentifierKey: "app.ibridge.central"])
         // Never sit idle while not linked, and never trust a "linked" state Android no longer shares.
@@ -146,11 +146,13 @@ final class Central: NSObject {
     }
 
     /// Queues one `AUDIO` plaintext. A sender that falls behind keeps the newest 3 and drops the oldest (PROTOCOL.md 8).
-    func sendAudio(_ plain: Data) {
+    func sendAudio(_ plain: Data, at: UInt64) {
         guard handshake?.isLive == true, rx != nil else { return }
         audio.append(plain)
+        audioAt.append(at)
         if audio.count > 3 {
             audio.removeFirst()
+            audioAt.removeFirst()
             audioDropped += 1
             if audioDropped % 50 == 1 { log.notice("audio: link behind, \(self.audioDropped, privacy: .public) frames dropped so far") }
         }
@@ -158,6 +160,8 @@ final class Central: NSObject {
     }
 
     private var audioDropped = 0
+    /// When each of `audio` was encoded (uptime ns); the bench's records carry none.
+    private var audioAt: [UInt64] = []
 
     /// Debug: `bench` (PROTOCOL.md 6). Android sends 500 stream-0 records, this iPhone counts them and sends 500 back.
     func startBench(n: Int = 500, size: Int = 60) {
@@ -252,6 +256,7 @@ final class Central: NSObject {
         deframer = Deframer()
         packets = []
         audio = []
+        audioAt = []
         chunks = []
         bench?.cancel()
         bench = nil
@@ -291,6 +296,7 @@ final class Central: NSObject {
         if audio.isEmpty, let frame = bench?.nextFrame() { audio.append(frame) }
         while !audio.isEmpty {
             let plain = audio.removeFirst()
+            if !audioAt.isEmpty { calls.sendLag.add(since: audioAt.removeFirst()) }
             if let h = handshake, let packet = (try? h.sealAudio(plain)) ?? nil { return packet }
         }
         return packets.isEmpty ? nil : packets.removeFirst()

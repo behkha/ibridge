@@ -9,8 +9,10 @@ import os
 final class CallManager: NSObject {
     /// Sends one message on the live link; false while not live. Set by the central.
     var send: (([String: Any]) -> Bool)?
-    /// Queues one `AUDIO` plaintext. Set by the central.
-    var sendAudio: ((Data) -> Void)?
+    /// Queues one `AUDIO` plaintext with the uptime (ns) its frame was encoded. Set by the central.
+    var sendAudio: ((Data, UInt64) -> Void)?
+    /// Encoded frames waiting for the radio; the central adds each one's wait.
+    var sendLag: Lag { audio.sendLag }
 
     private let store: Store
     private let provider: CXProvider
@@ -48,8 +50,8 @@ final class CallManager: NSObject {
         provider = CXProvider(configuration: config)
         super.init()
         provider.setDelegate(self, queue: nil) // main queue
-        audio.onFrame = { [weak self] opus in
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.sendFrame(opus) } }
+        audio.onFrame = { [weak self] opus, at in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.sendFrame(opus, at: at) } }
         }
     }
 
@@ -88,6 +90,9 @@ final class CallManager: NSObject {
         case "call.ring": return ring(m)
         case "call.state": state(m); return true
         case "call.end": end(m); return false // the store still clears a phase-1 alert and its ringing state
+        case "audio.tune": // debug (PROTOCOL.md 6)
+            audio.tune(start: m["jitterStart"] as? Int, spare: m["jitterSpare"] as? Int, ioMs: m["ioMs"] as? Int)
+            return true
         default: return false
         }
     }
@@ -189,12 +194,12 @@ final class CallManager: NSObject {
         audio.receive(seq: seq, opus: Data(plain.dropFirst(3)))
     }
 
-    private func sendFrame(_ opus: Data) {
+    private func sendFrame(_ opus: Data, at: UInt64) {
         guard let stream = relay?.stream, !opus.isEmpty, opus.count <= 400 else { return }
         var plain = Data([stream, UInt8(txSeq >> 8), UInt8(txSeq & 0xFF)])
         plain.append(opus)
         txSeq &+= 1
-        sendAudio?(plain)
+        sendAudio?(plain, at)
     }
 
     private func configureSession() {
@@ -202,7 +207,7 @@ final class CallManager: NSObject {
         let s = AVAudioSession.sharedInstance()
         do {
             try s.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetooth])
-            try s.setPreferredIOBufferDuration(0.01)
+            try s.setPreferredIOBufferDuration(0.005) // 5 ms: each way waits up to one I/O buffer
         } catch {
             log.error("audio session setup failed: \(String(describing: error), privacy: .public)")
         }

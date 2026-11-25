@@ -55,8 +55,12 @@ object CallHelper {
     private const val STREAM_VOICE_CALL = 0
     /** Uplink frames waiting for the call's clock; older ones are dropped (the iPhone side buffers the jitter). */
     private const val UP_QUEUE = 8
-    /** Frames the uplink waits for after running dry (40 ms): absorbs Bluetooth bursts. */
-    private const val UP_TARGET = 2
+    /** Frames the uplink waits for after running dry: absorbs Bluetooth bursts. Tunable (`tune`). */
+    @Volatile private var upPrime = 2
+    /** Frames the uplink keeps in hand: when the queue held more than this beyond the frame due for 1 s, the extra go. */
+    @Volatile private var upSpare = 1
+    /** Samples the uplink track may hold ahead of the call (its play-out buffer); the HAL may round it up. */
+    @Volatile private var trackFrames = Wire.FRAME * 2
 
     private var appUid = -1
     private var build = ""
@@ -190,6 +194,7 @@ object CallHelper {
             "dial" -> dial(c.optString("to"), c.optString("comp"), c.optString("id"))
             "relay" -> if (!c.optBoolean("on")) Relay.stop("asked") // `answer` and `dial` arm it
             "dtmf" -> Relay.dtmf(c.optString("d").firstOrNull() ?: ' ')
+            "tune" -> Relay.tune(c)
             "check" -> { lastState = null; check() } // iBridge accepted this connection: the next poll sends it the state
             else -> log("unknown command $name")
         }
@@ -311,6 +316,18 @@ object CallHelper {
         private var dtmfPhase = 0L
         // once-a-second stats, counted on the audio threads
         private val down = AtomicInteger(); private val up = AtomicInteger(); private val silent = AtomicInteger(); private val upDropped = AtomicInteger()
+        /** Uplink queue at each take, and ms of sound the track held ahead of the call after each write (min/avg/max). */
+        private val upDepth = Spread(); private val trackMs = Spread()
+        private var underrunsBefore = 0
+
+        /** Debug: new uplink buffer sizes, applied at once (`{"c":"tune","trackFrames":n,"upPrime":n,"upSpare":n}`). */
+        @Synchronized fun tune(c: JSONObject) {
+            if (c.has("upPrime")) upPrime = c.optInt("upPrime").coerceIn(1, 6)
+            if (c.has("upSpare")) upSpare = c.optInt("upSpare").coerceIn(0, 6)
+            if (c.has("trackFrames")) trackFrames = c.optInt("trackFrames").coerceIn(Wire.FRAME / 2, Wire.FRAME * 8)
+            val got = track?.let { runCatching { it.setBufferSizeInFrames(trackFrames) }.getOrNull() }
+            log("tune: upPrime $upPrime upSpare $upSpare trackFrames $trackFrames (track took ${got ?: "-"})")
+        }
 
         /** Starts at once when a call is dialing, alerting, active or held; otherwise when one is. */
         @Synchronized fun arm() {
@@ -345,6 +362,7 @@ object CallHelper {
             val t = try { uplinkTrack() } catch (e: Throwable) { error("track: ${cause(e)}"); null }
             if (r == null || t == null) { r?.release(); t?.release(); restore(); event(JSONObject().put("e", "relay").put("on", false).put("err", "open failed")); return }
             record = r; track = t
+            underrunsBefore = 0
             synchronized(upQueue) { upQueue.clear() }
             running = true
             val g = ++gen
@@ -422,6 +440,7 @@ object CallHelper {
         private fun live(g: Int) = running && gen == g
 
         private fun downLoop(r: AudioRecord, g: Int) {
+            urgent()
             val buf = ShortArray(Wire.FRAME)
             val bytes = ByteBuffer.allocate(Wire.FRAME_BYTES).order(ByteOrder.LITTLE_ENDIAN)
             try {
@@ -442,24 +461,36 @@ object CallHelper {
 
         /**
          * Paced by the call's clock: each blocking write takes the next frame from iBridge, or silence. Frames come over
-         * Bluetooth in bursts, so this is a small jitter buffer: after running dry it waits for [UP_TARGET] frames, and
-         * when the queue never fell below [UP_TARGET] + 1 for 2 s (clock drift, a burst) it drops one frame.
+         * Bluetooth in bursts, so this is a small jitter buffer: after running dry it waits for [upPrime] frames, and
+         * when the queue held more than [upSpare] frames beyond the one due for 1 s (clock drift, a burst after a stall)
+         * it drops that many, each at a quiet frame or within half a second.
+         * The track's own buffer is cut to [trackFrames], so the sound written waits there no longer than that.
          */
         private fun upLoop(t: AudioTrack, g: Int) {
+            urgent()
             val pcm = ShortArray(Wire.FRAME)
             var primed = false
             var lowest = Int.MAX_VALUE
             var n = 0
+            var excess = 0
+            var excessWait = 0
+            var written = 0L
+            val ts = android.media.AudioTimestamp()
             try {
+                log("uplink track: ${t.setBufferSizeInFrames(trackFrames)} of ${t.bufferCapacityInFrames} frames, latency ${trackLatency(t)} ms")
                 t.play()
                 while (live(g)) {
                     val frame = synchronized(upQueue) {
                         val size = upQueue.size
-                        if (size == 0) primed = false else if (size >= UP_TARGET) primed = true
+                        if (size == 0) { primed = false; excess = 0 } else if (size >= upPrime) primed = true
                         lowest = minOf(lowest, size)
-                        if (++n >= 100) {
-                            if (lowest > UP_TARGET && upQueue.size > 0) { upQueue.removeFirst(); upDropped.incrementAndGet() }
+                        upDepth.add(size)
+                        if (++n >= 50) {
+                            if (excess == 0 && lowest > upSpare + 1) { excess = lowest - upSpare - 1; excessWait = 0 }
                             n = 0; lowest = Int.MAX_VALUE
+                        }
+                        if (excess > 0 && upQueue.size > 1 && (quiet(upQueue.first()) || ++excessWait > 25)) {
+                            upQueue.removeFirst(); upDropped.incrementAndGet(); excess--; excessWait = 0
                         }
                         if (primed) upQueue.pollFirst() else null
                     }
@@ -468,6 +499,11 @@ object CallHelper {
                     mixDtmf(pcm)
                     val w = t.write(pcm, 0, Wire.FRAME)
                     if (w < 0) { if (live(g)) fail(g, "uplink write $w"); return }
+                    written += w
+                    // Sound written but not yet played out at the call: the track's whole buffer, HAL included.
+                    val played = if (t.getTimestamp(ts)) ts.framePosition + (System.nanoTime() - ts.nanoTime) * Wire.RATE / 1_000_000_000L
+                        else t.playbackHeadPosition.toLong() and 0xFFFFFFFFL
+                    trackMs.add(((written - played) * 1000 / Wire.RATE).toInt())
                 }
             } catch (e: Throwable) { if (live(g)) fail(g, "uplink: ${cause(e)}") }
         }
@@ -488,13 +524,39 @@ object CallHelper {
                 SystemClock.sleep(1000)
                 if (!live(g)) return
                 enforce()
-                val q = synchronized(upQueue) { upQueue.size }
                 val d = down.getAndSet(0); val u = up.getAndSet(0); val s = silent.getAndSet(0); val x = upDropped.getAndSet(0)
-                Log.i(TAG, "helper: relay down=$d up=$u silent=$s upDropped=$x upQueue=$q underruns=${track?.underrunCount ?: -1}")
-                event(JSONObject().put("e", "stats").put("down", d).put("up", u).put("silent", s).put("upDropped", x).put("upQueue", q))
+                val q = upDepth.take(); val tm = trackMs.take()
+                val runs = (track?.underrunCount ?: 0).let { total -> (total - underrunsBefore).also { underrunsBefore = total } }
+                Log.i(TAG, "helper: relay down=$d up=$u silent=$s upDropped=$x upQueue=$q trackMs=$tm underruns=$runs")
+                event(JSONObject().put("e", "stats").put("down", d).put("up", u).put("silent", s).put("upDropped", x).put("upQueue", q)
+                    .put("track", tm).put("underruns", runs))
             }
         }
     }
+
+    /** min/avg/max of the values since the last [take], for the once-a-second stats. */
+    private class Spread {
+        private var n = 0; private var sum = 0L; private var min = Int.MAX_VALUE; private var max = Int.MIN_VALUE
+        @Synchronized fun add(v: Int) { n++; sum += v; if (v < min) min = v; if (v > max) max = v }
+        @Synchronized fun take(): String = (if (n == 0) "-" else "$min/${sum / n}/$max").also { n = 0; sum = 0; min = Int.MAX_VALUE; max = Int.MIN_VALUE }
+    }
+
+    /** Under -40 dBFS: a frame that can be dropped unheard. */
+    private fun quiet(pcm: ByteArray): Boolean {
+        val b = ByteBuffer.wrap(pcm).order(ByteOrder.LITTLE_ENDIAN).asShortBuffer()
+        var sum = 0L
+        while (b.hasRemaining()) { val v = b.get().toLong(); sum += v * v }
+        return sum / Wire.FRAME < 107_374 // (0.01 × 32768)²
+    }
+
+    /** The audio threads ask for real-time priority; a shell process may be refused it (logged once per relay). */
+    private fun urgent() {
+        try { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO) }
+        catch (e: Exception) { log("${Thread.currentThread().name}: no urgent audio priority (${e.message})") }
+    }
+
+    /** AudioTrack's hidden getLatency(): the whole output path in ms, or -1. */
+    private fun trackLatency(t: AudioTrack): Int = runCatching { AudioTrack::class.java.getMethod("getLatency").invoke(t) as Int }.getOrDefault(-1)
 
     // ---- audio paths (what AudioManager's hidden getCallDownlinkExtractionAudioRecord / getCallUplinkInjectionAudioTrack build) ----
 
